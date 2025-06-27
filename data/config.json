@@ -1,0 +1,55 @@
+{
+  "system": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "apiPrefix": "/api/v1",
+    "environment": "test"
+  },
+  "vika": {
+    "userToken": "uskoInjR7NrA4OfkL97qN37",
+    "apiBase": "https://api.vika.cn",
+    "spaceId": "spcBxkW6UiuzT",
+    "rateLimitQPS": 2
+  },
+  "database": {
+    "type": "sqlite",
+    "sqlite": {
+      "path": "./data/a2a_system.db"
+    },
+    "mysql": {
+      "host": "10.121.232.66",
+      "port": 3306,
+      "database": "a2a_system",
+      "username": "root",
+      "password": ""
+    }
+  },
+  "agentPlatform": {
+    "test": {
+      "type": "openai",
+      "apiBase": "https://api.deepseek.com/v1",
+      "apiKey": "",
+      "model": "deepseek-chat",
+      "apiEndpoint": "/v1/chat/completions"
+    },
+    "production": {
+      "type": "csg",
+      "apiBase": "http://10.121.232.66:8080",
+      "apiKey": "",
+      "appId": "",
+      "appSecret": "",
+      "apiEndpoint": "/knowledgeService/extChatApi/v2/chat"
+    }
+  },
+  "taskExecution": {
+    "maxConcurrentTasks": 10,
+    "taskTimeout": 300000,
+    "retryAttempts": 3,
+    "logLevel": "info"
+  },
+  "cache": {
+    "enabled": true,
+    "ttl": 3600,
+    "maxKeys": 1000
+  }
+}

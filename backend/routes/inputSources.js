@@ -4,7 +4,7 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../database/init');
+const { db } = require('../database/init');
 const logger = require('../utils/logger');
 const { asyncErrorHandler, ValidationError, NotFoundError, ConflictError } = require('../middleware/errorHandler');
 const { getCurrentEnvironment } = require('../config/environment');
@@ -13,6 +13,7 @@ const { getCurrentEnvironment } = require('../config/environment');
  * 获取输入源列表
  */
 router.get('/', asyncErrorHandler(async (req, res) => {
+  logger.info('GET /api/v1/input-sources - 收到请求', { query: req.query });
   
   const { page = 1, pageSize = 20, status, agent_id, source_type } = req.query;
   const offset = (page - 1) * pageSize;
@@ -81,6 +82,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     }));
     
     
+    logger.info('GET /api/v1/input-sources - 操作成功');
     res.json({
       success: true,
       code: 200,
@@ -98,7 +100,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取输入源列表失败', { error: error.message });
+    logger.error('获取输入源列表失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -108,6 +110,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
  */
 router.get('/:source_id', asyncErrorHandler(async (req, res) => {
   const { source_id } = req.params;
+  logger.info(`GET /api/v1/input-sources/${source_id} - 收到请求`, { params: req.params });
   
   try {
     const inputSource = await new Promise((resolve, reject) => {
@@ -129,6 +132,7 @@ router.get('/:source_id', asyncErrorHandler(async (req, res) => {
     }
     
     
+    logger.info(`GET /api/v1/input-sources/${source_id} - 操作成功`);
     res.json({
       success: true,
       code: 200,
@@ -141,6 +145,7 @@ router.get('/:source_id', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
+    logger.error(`获取输入源详情失败，source_id: ${source_id}`, { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -150,6 +155,7 @@ router.get('/:source_id', asyncErrorHandler(async (req, res) => {
  */
 router.post('/', asyncErrorHandler(async (req, res) => {
   const { source_name, source_type, endpoint, agent_id, config } = req.body;
+  logger.info('POST /api/v1/input-sources - 收到请求', { body: req.body });
   
   // 参数验证
   if (!source_name || !source_type || !endpoint || !agent_id) {
@@ -202,7 +208,7 @@ router.post('/', asyncErrorHandler(async (req, res) => {
     });
     
     
-    logger.info('输入源创建成功', { id: result.id, endpoint, agent_id });
+    logger.info(`POST /api/v1/input-sources - 操作成功，source_id: ${result.id}`);
     
     res.status(201).json({
       success: true,
@@ -223,7 +229,7 @@ router.post('/', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('输入源创建失败', { error: error.message });
+    logger.error('输入源创建失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -234,7 +240,7 @@ router.post('/', asyncErrorHandler(async (req, res) => {
 router.put('/:id', asyncErrorHandler(async (req, res) => {
   const { id } = req.params;
   const { source_name, agent_id, config, status } = req.body;
-
+  logger.info(`PUT /api/v1/input-sources/${id} - 收到请求`, { params: req.params, body: req.body });
 
   try {
     // 检查输入源是否存在
@@ -320,7 +326,7 @@ router.put('/:id', asyncErrorHandler(async (req, res) => {
     });
     
     
-    logger.info('输入源更新成功', { id });
+    logger.info(`PUT /api/v1/input-sources/${id} - 操作成功`);
     
     res.json({
       success: true,
@@ -334,7 +340,7 @@ router.put('/:id', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('输入源更新失败', { id, error: error.message });
+    logger.error('输入源更新失败', { id, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -344,6 +350,7 @@ router.put('/:id', asyncErrorHandler(async (req, res) => {
  */
 router.delete('/:id', asyncErrorHandler(async (req, res) => {
   const { id } = req.params;
+  logger.info(`DELETE /api/v1/input-sources/${id} - 收到请求`, { params: req.params });
   
   try {
     // 检查输入源是否存在
@@ -383,7 +390,7 @@ router.delete('/:id', asyncErrorHandler(async (req, res) => {
     });
     
     
-    logger.info('输入源删除成功', { id, endpoint: existingSource.endpoint });
+    logger.info(`DELETE /api/v1/input-sources/${id} - 操作成功`);
     
     res.json({
       success: true,
@@ -393,7 +400,7 @@ router.delete('/:id', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('输入源删除失败', { id, error: error.message });
+    logger.error('输入源删除失败', { id, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -404,12 +411,9 @@ router.delete('/:id', asyncErrorHandler(async (req, res) => {
 router.post('/:id/test', asyncErrorHandler(async (req, res) => {
   const { id } = req.params;
   const { test_data } = req.body;
+  logger.info(`POST /api/v1/input-sources/${id}/test - 收到请求`, { params: req.params, body: req.body });
   
   try {
-    logger.info('接收到输入源的原始请求', {
-      endpointId: req.params.id,
-      body: req.body
-    });
     // 获取输入源信息
     const inputSource = await new Promise((resolve, reject) => {
       const sql = `
@@ -437,7 +441,7 @@ router.post('/:id/test', asyncErrorHandler(async (req, res) => {
       test: true
     };
     
-    logger.info('输入源测试', { id, endpoint: inputSource.endpoint });
+    logger.info(`POST /api/v1/input-sources/${id}/test - 操作成功`);
     
     res.json({
       success: true,
@@ -457,7 +461,7 @@ router.post('/:id/test', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('输入源测试失败', { id, error: error.message });
+    logger.error('输入源测试失败', { id, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -466,6 +470,7 @@ router.post('/:id/test', asyncErrorHandler(async (req, res) => {
  * 获取输入源统计信息
  */
 router.get('/stats/overview', asyncErrorHandler(async (req, res) => {
+  logger.info('GET /api/v1/input-sources/stats/overview - 收到请求');
   
   try {
     // 获取各种统计数据
@@ -502,6 +507,7 @@ router.get('/stats/overview', asyncErrorHandler(async (req, res) => {
     });
     
     
+    logger.info('GET /api/v1/input-sources/stats/overview - 操作成功');
     res.json({
       success: true,
       code: 200,
@@ -517,7 +523,7 @@ router.get('/stats/overview', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取输入源统计失败', { error: error.message });
+    logger.error('获取输入源统计失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));

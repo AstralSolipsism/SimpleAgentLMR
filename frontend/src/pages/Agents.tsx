@@ -13,8 +13,9 @@ interface Agent {
   app_id: string;
   app_name: string;
   responsibilities_and_functions: string;
-  allowed_tool_names: string[];
-  subordinate_agent_ids: string[];
+  capabilities?: { capability_type: string; target_name: string }[];
+  allowed_tool_names?: string[];
+  subordinate_agent_ids?: string[];
   status: 'active' | 'inactive' | 'error';
   createdAt: string;
   model?: string;
@@ -36,6 +37,7 @@ export function Agents() {
   const [showForm, setShowForm] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [selectedApplication, setSelectedApplication] = useState<any | null>(null);
+  const [testingStates, setTestingStates] = useState<{ [key: string]: boolean }>({});
   
   // Updated formData state
   const [formData, setFormData] = useState({
@@ -58,7 +60,7 @@ export function Agents() {
       const [agentsRes, appsRes, mcpRes] = await Promise.all([
         fetch('/api/v1/agents'),
         fetch('/api/v1/applications'),
-        fetch('/api/v1/mcp')
+        fetch('/api/v1/mcp/tools')
       ]);
       
       const [agentsApiResponse, appsApiResponse, mcpApiResponse] = await Promise.all([
@@ -69,9 +71,23 @@ export function Agents() {
       
       if (agentsApiResponse.success && agentsApiResponse.data) {
         const agentItems = agentsApiResponse.data.items || [];
-        setAgents(agentItems);
+        const processedData = agentItems.map((agent: any) => {
+          const allowed_tool_names: string[] = [];
+          const subordinate_agent_ids: string[] = [];
+          if (Array.isArray(agent.capabilities)) {
+            for (const cap of agent.capabilities) {
+              if (cap.capability_type === 'mcp_tool') {
+                allowed_tool_names.push(cap.target_name);
+              } else if (cap.capability_type === 'sub_agent') {
+                subordinate_agent_ids.push(cap.target_name);
+              }
+            }
+          }
+          return { ...agent, allowed_tool_names, subordinate_agent_ids };
+        });
+        setAgents(processedData);
         // Populate the list for the subordinate agent selector
-        const simplifiedAgents = agentItems.map((agent: any) => ({
+        const simplifiedAgents = processedData.map((agent: any) => ({
           id: agent.agentId,
           name: agent.agent_name,
         }));
@@ -81,7 +97,7 @@ export function Agents() {
         setApplications(appsApiResponse.data.items || []);
       }
       if (mcpApiResponse.success && mcpApiResponse.data) {
-        setMcpTools(mcpApiResponse.data.items || []);
+        setMcpTools(mcpApiResponse.data.tools || []);
       }
     } catch (error) {
       console.error('Failed to fetch data:', error);
@@ -175,12 +191,15 @@ export function Agents() {
   };
 
   const testConnection = async (agentId: string) => {
+    setTestingStates(prev => ({ ...prev, [agentId]: true }));
     try {
       const response = await fetch(`/api/v1/agents/${agentId}/test`, { method: 'POST' });
       const result = await response.json();
       alert(result.success ? '连接测试成功' : `连接测试失败: ${result.error}`);
     } catch (error) {
       alert('连接测试失败');
+    } finally {
+      setTestingStates(prev => ({ ...prev, [agentId]: false }));
     }
   };
 
@@ -297,24 +316,13 @@ export function Agents() {
               {/* Updated Tools Selector */}
               <div>
                 <label className="block text-sm font-medium text-gray-700">允许调用的工具</label>
-                <div className="mt-2 space-y-2">
-                  {mcpTools.map((tool) => (
-                    <label key={tool.id} className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={formData.allowed_tool_names.includes(tool.name)}
-                        onChange={(e) => {
-                          const toolName = tool.name;
-                          const newSelection = e.target.checked
-                            ? [...formData.allowed_tool_names, toolName]
-                            : formData.allowed_tool_names.filter(name => name !== toolName);
-                          setFormData({ ...formData, allowed_tool_names: newSelection });
-                        }}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <span className="ml-2 text-sm text-gray-700">{tool.name}</span>
-                    </label>
-                  ))}
+                <div className="mt-2">
+                  <MultiSelectCombobox
+                    options={mcpTools.map(tool => ({ id: tool.tool_name, name: tool.tool_name }))}
+                    selectedValues={formData.allowed_tool_names}
+                    onChange={(selected) => setFormData({ ...formData, allowed_tool_names: selected })}
+                    placeholder="选择允许调用的工具..."
+                  />
                 </div>
               </div>
 
@@ -407,10 +415,11 @@ export function Agents() {
                   <div className="flex space-x-2">
                     <button
                       onClick={() => testConnection(agent.agentId)}
-                      className="inline-flex items-center px-3 py-1 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50"
+                      disabled={testingStates[agent.agentId]}
+                      className="inline-flex items-center px-3 py-1 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 disabled:bg-gray-200 disabled:cursor-not-allowed"
                     >
                       <TestTube className="h-3 w-3 mr-1" />
-                      测试
+                      {testingStates[agent.agentId] ? '测试中...' : '测试'}
                     </button>
                   </div>
                   <div className="flex space-x-2">

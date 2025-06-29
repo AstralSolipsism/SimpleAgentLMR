@@ -1,6 +1,6 @@
 const { globalConfig } = require('../config/globalConfig');
 const { getResponseParser } = require('../config/environment');
-const db = require('../database/init.js');
+const { db } = require('../database/init.js');
 
 /**
  * 智能体响应解析器
@@ -27,9 +27,10 @@ class AgentResponseParser {
    * 解析智能体响应
    * @param {string} content - 智能体返回的content
    * @param {string} agentId - 当前智能体ID
+   * @param {Object} options - 解析选项，例如 { react_mode: true }
    * @returns {Object} 解析结果
    */
-  parseAgentResponse(content, agentId) {
+  parseAgentResponse(content, agentId, options = {}) {
     const result = {
       agentId,
       content,
@@ -38,10 +39,76 @@ class AgentResponseParser {
       vikaOperations: [],
       skillCalls: [],
       results: [],
+      thought: '', // 新增 thought 字段
       hasStructuredOutput: false
     };
-    
-    // 解析A2A任务传递
+
+    // ReAct 模式下，只解析第一个有效的指令
+    if (options && options.react_mode) {
+      // 提取思考过程
+      const thoughtMatch = content.match(/Thought:(.*?)(?=Action:|Final Answer:|$)/s);
+      if (thoughtMatch) {
+        result.thought = thoughtMatch[1].trim();
+      }
+
+      // 查找第一个动作或最终答案
+      const finalAnswerMatch = content.match(/Final Answer:\s*(.*)/s);
+      if (finalAnswerMatch) {
+        const finalAction = { type: 'result', data: finalAnswerMatch[1].trim() };
+        result.actions.push(finalAction);
+        result.results.push(finalAction); // 兼容旧字段
+        result.hasStructuredOutput = true;
+        return result;
+      }
+
+      const actionMatch = content.match(/```json:(.*?)\s*\n([\s\S]*?)\n```/s); // 修改这里的正则表达式，使用[\s\S]*?匹配多行
+      if (actionMatch) {
+        const actionType = actionMatch[1].trim();
+        const actionJson = actionMatch[2].trim();
+        try {
+          const jsonToParse = actionType === 'skill-call'
+            ? actionJson.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '')
+            : actionJson;
+          const parsed = JSON.parse(jsonToParse);
+          let action = {};
+          
+          // 映射到协议定义的类型
+          switch (actionType) {
+            case 'a2a-task':
+              action = { type: 'task_transfer', ...parsed };
+              result.taskTransfers.push(action);
+              break;
+            case 'vika-operation':
+              action = { type: 'vika_operation', ...parsed };
+              result.vikaOperations.push(action);
+              break;
+            case 'skill-call':
+              action = { type: 'skill_call', ...parsed };
+              result.skillCalls.push(action);
+              break;
+            case 'result':
+               action = { type: 'result', data: parsed }; // 如果LLM直接输出json:result，data应该是解析后的json
+               result.results.push(action);
+               result.actions.push(action); // 确保添加到actions中
+               result.hasStructuredOutput = true;
+               return result; // 直接返回，因为这是最终答案
+            default:
+              // 如果是不支持的类型，则不作为有效action
+              return result;
+          }
+          
+          result.actions.push(action);
+          result.hasStructuredOutput = true;
+
+        } catch (error) {
+          console.error(`ReAct模式下JSON解析错误 (${actionType}):`, error);
+        }
+      }
+      
+      return result;
+    }
+
+    // --- 以下是旧的、非ReAct模式的逻辑 ---
     const taskTransfers = this.extractPattern(content, this.patterns.taskTransfer);
     taskTransfers.forEach(taskData => {
       try {
@@ -84,7 +151,9 @@ class AgentResponseParser {
     const skillCalls = this.extractPattern(content, this.patterns.skillCall);
     skillCalls.forEach(skillData => {
       try {
-        const parsed = JSON.parse(skillData);
+        // 移除JSON字符串中的注释，提高解析的健壮性
+        const cleanedJsonString = skillData.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
+        const parsed = JSON.parse(cleanedJsonString);
         result.skillCalls.push({
           type: 'skill_call',
           skill: parsed.skill,

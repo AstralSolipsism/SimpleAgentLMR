@@ -4,7 +4,7 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../database/init');
+const { db } = require('../database/init');
 const logger = require('../utils/logger');
 const { asyncErrorHandler } = require('../middleware/errorHandler');
 const { getSystemInfo } = require('../utils/systemInfo');
@@ -12,12 +12,13 @@ const vikaService = require('../services/vikaService');
 const CSGClient = require('../services/csgClient');
 const { getCurrentEnvironment } = require('../config/environment');
 
-const csgClient = new CSGClient();
+const csgClient = require('../services/csgClient');
 
 /**
  * 获取智能体网络图数据
  */
 router.get('/network', asyncErrorHandler(async (req, res) => {
+  logger.info('GET /api/v1/visualization/network - Request received');
   
   try {
     // 获取所有应用
@@ -150,6 +151,7 @@ router.get('/network', asyncErrorHandler(async (req, res) => {
       }
     });
     
+    logger.info('GET /api/v1/visualization/network - Operation successful');
     res.json({
       success: true,
       code: 200,
@@ -169,7 +171,7 @@ router.get('/network', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取智能体网络图数据失败', { error: error.message });
+    logger.error('获取智能体网络图数据失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -178,6 +180,7 @@ router.get('/network', asyncErrorHandler(async (req, res) => {
  * 获取系统统计数据
  */
 router.get('/stats', asyncErrorHandler(async (req, res) => {
+  logger.info('GET /api/v1/visualization/stats - Request received');
   
   try {
     // 获取各种统计数据
@@ -288,6 +291,7 @@ router.get('/stats', asyncErrorHandler(async (req, res) => {
     });
     
     
+    logger.info('GET /api/v1/visualization/stats - Operation successful');
     res.json({
       success: true,
       code: 200,
@@ -297,7 +301,7 @@ router.get('/stats', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取系统统计数据失败', { error: error.message });
+    logger.error('获取系统统计数据失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -307,6 +311,7 @@ router.get('/stats', asyncErrorHandler(async (req, res) => {
  */
 router.get('/trends/tasks', asyncErrorHandler(async (req, res) => {
   const { days = 30 } = req.query;
+  logger.info('GET /api/v1/visualization/trends/tasks - Request received', { query: req.query });
   
   try {
     const trends = await new Promise((resolve, reject) => {
@@ -337,6 +342,7 @@ router.get('/trends/tasks', asyncErrorHandler(async (req, res) => {
     });
     
     
+    logger.info('GET /api/v1/visualization/trends/tasks - Operation successful');
     res.json({
       success: true,
       code: 200,
@@ -349,7 +355,7 @@ router.get('/trends/tasks', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取任务执行趋势失败', { error: error.message });
+    logger.error('获取任务执行趋势失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -358,6 +364,7 @@ router.get('/trends/tasks', asyncErrorHandler(async (req, res) => {
  * 获取实时监控数据
  */
 router.get('/realtime', asyncErrorHandler(async (req, res) => {
+  logger.info('GET /api/v1/visualization/realtime - Request received');
   
   try {
     // 获取当前活跃任务
@@ -404,6 +411,7 @@ router.get('/realtime', asyncErrorHandler(async (req, res) => {
     };
     
     
+    logger.info('GET /api/v1/visualization/realtime - Operation successful');
     res.json({
       success: true,
       code: 200,
@@ -417,7 +425,7 @@ router.get('/realtime', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取实时监控数据失败', { error: error.message });
+    logger.error('获取实时监控数据失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -492,6 +500,7 @@ async function refreshNetworkDataCache() {
 }
 
 router.get('/stats/dashboard', async (req, res) => {
+    logger.info('GET /api/v1/visualization/stats/dashboard - Request received');
     const now = Date.now();
 
     // 1. 首次加载处理：确保首次响应有完整数据

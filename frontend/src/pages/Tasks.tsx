@@ -11,13 +11,15 @@ interface Task {
   id: string;
   source_id: string;
   source_name?: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'delegated';
   input_data: { input: string, context: any };
   result?: any;
   error?: string;
   created_at: string;
   started_at?: string;
   finished_at?: string;
+  steps?: TaskStep[];
+  subtasks?: Task[]; // 新增 subtasks 字段
 }
 
 // 新的TaskStep接口
@@ -43,6 +45,7 @@ export function Tasks() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskSteps, setTaskSteps] = useState<TaskStep[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [filter, setFilter] = useState<string>('all');
   const [isStreaming, setIsStreaming] = useState(false);
   const [expandedStepId, setExpandedStepId] = useState<string | null>(null);
@@ -78,15 +81,21 @@ export function Tasks() {
     }
   };
 
-  const fetchTaskSteps = async (taskId: string) => {
+  const fetchTaskDetails = async (taskId: string) => {
+    setLoadingDetails(true);
     try {
-      const response = await fetch(`/api/v1/tasks/${taskId}/steps`);
+      const response = await fetch(`/api/v1/tasks/${taskId}`);
       const apiResponse = await response.json();
       if (apiResponse.success && apiResponse.data) {
-        setTaskSteps(apiResponse.data || []);
+        setSelectedTask(apiResponse.data);
+        setTaskSteps(apiResponse.data.steps || []);
       }
     } catch (error) {
-      console.error('Failed to fetch task steps:', error);
+      console.error('Failed to fetch task details:', error);
+      setSelectedTask(null);
+      setTaskSteps([]);
+    } finally {
+      setLoadingDetails(false);
     }
   };
 
@@ -140,6 +149,7 @@ export function Tasks() {
       case 'running': return 'bg-blue-100 text-blue-800';
       case 'failed': return 'bg-red-100 text-red-800';
       case 'cancelled': return 'bg-gray-100 text-gray-800';
+      case 'delegated': return 'bg-purple-100 text-purple-800';
       default: return 'bg-yellow-100 text-yellow-800';
     }
   };
@@ -151,6 +161,7 @@ export function Tasks() {
       case 'failed': return '失败';
       case 'cancelled': return '已取消';
       case 'pending': return '等待中';
+      case 'delegated': return '已委托';
       default: return status;
     }
   };
@@ -185,6 +196,7 @@ export function Tasks() {
               <option value="completed">已完成</option>
               <option value="failed">失败</option>
               <option value="pending">等待中</option>
+              <option value="delegated">已委托</option>
             </select>
           </div>
         </div>
@@ -212,8 +224,7 @@ export function Tasks() {
                       key={task.id}
                       className={containerClass}
                       onClick={() => {
-                        setSelectedTask(task);
-                        fetchTaskSteps(task.id);
+                        fetchTaskDetails(task.id);
                       }}
                     >
                       <div className="flex items-center justify-between">
@@ -303,51 +314,94 @@ export function Tasks() {
                   </div>
                 )}
 
-                <div>
-                  <h4 className="text-sm font-medium text-gray-900 mb-2">执行步骤</h4>
-                  <div className="bg-gray-50 border rounded-md p-3 h-80 overflow-y-auto text-xs space-y-2">
-                    {taskSteps.length === 0 ? (
-                      <div className="text-gray-500">暂无步骤信息</div>
-                    ) : (
-                      taskSteps.map((step) => (
-                        <Collapsible key={step.id} open={expandedStepId === step.id.toString()} onOpenChange={() => setExpandedStepId(expandedStepId === step.id.toString() ? null : step.id.toString())}>
-                          <div className="p-2 border-b">
-                            <CollapsibleTrigger className="flex justify-between items-center w-full text-left">
-                              <span className="font-bold text-gray-800">{step.step_id}: {step.agent_name}</span>
-                              <div className="flex items-center space-x-2">
-                                <span className={`font-semibold ${getStatusColor(step.status)} px-2 py-0.5 rounded-full`}>
-                                  {getStatusText(step.status)}
-                                </span>
-                                <ChevronDown className="h-4 w-4 transition-transform duration-200 data-[state=open]:rotate-180" />
-                              </div>
-                            </CollapsibleTrigger>
-                            <CollapsibleContent className="mt-2 space-y-2">
-                              <div className="bg-gray-100 p-2 rounded">
-                                <h5 className="font-semibold text-gray-700">原始Prompt</h5>
-                                <pre className="mt-1 text-xs text-gray-600 font-mono whitespace-pre-wrap">
-                                  <code>{step.input}</code>
-                                </pre>
-                              </div>
-                              {step.response && (
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-900 mb-2">主任务执行步骤</h4>
+                    <div className="bg-gray-50 border rounded-md p-3 max-h-60 overflow-y-auto text-xs space-y-2">
+                      {loadingDetails ? (
+                        <div className="text-gray-500">加载步骤中...</div>
+                      ) : taskSteps.length === 0 ? (
+                        <div className="text-gray-500">暂无步骤信息</div>
+                      ) : (
+                        taskSteps.map((step) => (
+                          <Collapsible key={step.id} open={expandedStepId === step.id.toString()} onOpenChange={() => setExpandedStepId(expandedStepId === step.id.toString() ? null : step.id.toString())}>
+                            <div className="p-2 border-b">
+                              <CollapsibleTrigger className="flex justify-between items-center w-full text-left">
+                                <span className="font-bold text-gray-800">{step.step_id}: {step.agent_name}</span>
+                                <div className="flex items-center space-x-2">
+                                  <span className={`font-semibold ${getStatusColor(step.status)} px-2 py-0.5 rounded-full`}>
+                                    {getStatusText(step.status)}
+                                  </span>
+                                  <ChevronDown className="h-4 w-4 transition-transform duration-200 data-[state=open]:rotate-180" />
+                                </div>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent className="mt-2 space-y-2">
                                 <div className="bg-gray-100 p-2 rounded">
-                                  <h5 className="font-semibold text-gray-700">原始Completion</h5>
+                                  <h5 className="font-semibold text-gray-700">原始Prompt</h5>
                                   <pre className="mt-1 text-xs text-gray-600 font-mono whitespace-pre-wrap">
-                                    <code>{JSON.stringify(step.response, null, 2)}</code>
+                                    <code>{step.input}</code>
                                   </pre>
                                 </div>
-                              )}
-                              {step.error && (
-                                <div className="bg-red-100 p-2 rounded">
-                                  <h5 className="font-semibold text-red-800">错误</h5>
-                                  <p className="text-red-600 font-mono">{step.error}</p>
-                                </div>
-                              )}
-                            </CollapsibleContent>
-                          </div>
-                        </Collapsible>
-                      ))
-                    )}
+                                {step.response && (
+                                  <div className="bg-gray-100 p-2 rounded">
+                                    <h5 className="font-semibold text-gray-700">原始Completion</h5>
+                                    <pre className="mt-1 text-xs text-gray-600 font-mono whitespace-pre-wrap">
+                                      <code>{JSON.stringify(step.response, null, 2)}</code>
+                                    </pre>
+                                  </div>
+                                )}
+                                {step.error && (
+                                  <div className="bg-red-100 p-2 rounded">
+                                    <h5 className="font-semibold text-red-800">错误</h5>
+                                    <p className="text-red-600 font-mono">{step.error}</p>
+                                  </div>
+                                )}
+                              </CollapsibleContent>
+                            </div>
+                          </Collapsible>
+                        ))
+                      )}
+                    </div>
                   </div>
+
+                  {selectedTask.subtasks && selectedTask.subtasks.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-900 mb-2">子任务</h4>
+                      <div className="space-y-3">
+                        {selectedTask.subtasks.map(subtask => (
+                          <Collapsible key={subtask.id}>
+                            <div className="p-3 border rounded-lg bg-blue-50">
+                              <CollapsibleTrigger className="flex justify-between items-center w-full text-left">
+                                <div className="flex-1">
+                                  <span className="font-bold text-blue-800">子任务: {subtask.id.substring(0, 8)}...</span>
+                                  <p className="text-xs text-blue-600 mt-1">输入: {subtask.input_data.input}</p>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <span className={`font-semibold ${getStatusColor(subtask.status)} px-2 py-0.5 rounded-full`}>
+                                    {getStatusText(subtask.status)}
+                                  </span>
+                                  <ChevronDown className="h-4 w-4 transition-transform duration-200 data-[state=open]:rotate-180" />
+                                </div>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent className="mt-3 pt-3 border-t border-blue-200 space-y-2">
+                                <h5 className="text-xs font-bold text-blue-800">子任务步骤:</h5>
+                                {subtask.steps && subtask.steps.length > 0 ? (
+                                  subtask.steps.map(step => (
+                                    <div key={step.id} className="p-2 bg-white rounded border">
+                                      <p className="font-semibold">{step.step_id}: {step.agent_name}</p>
+                                      <p className="text-xs text-gray-600">状态: {getStatusText(step.status)}</p>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <p className="text-xs text-gray-500">该子任务没有步骤。</p>
+                                )}
+                              </CollapsibleContent>
+                            </div>
+                          </Collapsible>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

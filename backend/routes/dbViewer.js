@@ -3,7 +3,7 @@
  */
 const express = require('express');
 const router = express.Router();
-const db = require('../database/init');
+const { db } = require('../database/init');
 const logger = require('../utils/logger');
 const { asyncErrorHandler } = require('../middleware/errorHandler');
 
@@ -11,6 +11,7 @@ const { asyncErrorHandler } = require('../middleware/errorHandler');
  * 获取所有数据表的名称列表
  */
 router.get('/tables', asyncErrorHandler(async (req, res) => {
+  logger.info('GET /api/v1/db-viewer/tables - 收到请求');
   try {
     const tables = await new Promise((resolve, reject) => {
       db.all("SELECT name FROM sqlite_master WHERE type='table'", (err, rows) => {
@@ -22,6 +23,7 @@ router.get('/tables', asyncErrorHandler(async (req, res) => {
       });
     });
     
+    logger.info('GET /api/v1/db-viewer/tables - 操作成功');
     res.json({
       success: true,
       code: 200,
@@ -31,7 +33,7 @@ router.get('/tables', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取数据库表列表失败', { error: error.message });
+    logger.error('获取数据库表列表失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -42,6 +44,7 @@ router.get('/tables', asyncErrorHandler(async (req, res) => {
 router.get('/tables/:tableName', asyncErrorHandler(async (req, res) => {
   const { tableName } = req.params;
   const { page = 1, pageSize = 20 } = req.query;
+  logger.info(`GET /api/v1/db-viewer/tables/${tableName} - 收到请求`, { params: req.params, query: req.query });
   const offset = (page - 1) * pageSize;
 
   // 安全性检查：确保表名是合法的，防止SQL注入
@@ -53,7 +56,7 @@ router.get('/tables/:tableName', asyncErrorHandler(async (req, res) => {
   });
 
   if (!tables.includes(tableName)) {
-    return res.status(404).json({ success: false, message: 'Table not found' });
+    return res.status(404).json({ success: false, message: '表不存在' });
   }
 
   try {
@@ -74,6 +77,7 @@ router.get('/tables/:tableName', asyncErrorHandler(async (req, res) => {
       });
     });
 
+    logger.info(`GET /api/v1/db-viewer/tables/${tableName} - 操作成功`);
     res.json({
       success: true,
       code: 200,
@@ -91,7 +95,7 @@ router.get('/tables/:tableName', asyncErrorHandler(async (req, res) => {
     });
 
   } catch (error) {
-    logger.error(`获取表 ${tableName} 内容失败`, { error: error.message });
+    logger.error(`获取表 ${tableName} 内容失败`, { error: error.message, stack: error.stack });
     throw error;
   }
 }));

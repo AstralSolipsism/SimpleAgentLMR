@@ -3,7 +3,7 @@ const path = require('path');
 const axios = require('axios');
 const { globalConfig } = require('../config/globalConfig');
 const { getCurrentEnvironment, getResponseParser } = require('../config/environment');
-const db = require('../database/init');
+const { db } = require('../database/init');
 const logger = require('../utils/logger');
 
 const healthCache = {
@@ -144,10 +144,10 @@ class CSGClient {
   /**
    * 调用智能体 (重构后)
    * @param {object} agentObject - 从数据库查询并传入的完整智能体对象
-   * @param {string} message - 用户输入
+   * @param {Array<object>} messages - 消息历史记录
    * @param {object} options - 调用选项，如 systemPrompt, temperature 等
    */
-  async callAgent(agentObject, message, options = {}) {
+  async callAgent(agentObject, messages, options = {}) {
     try {
       // 直接使用传入的 agentObject，不再进行数据库查询
       if (!agentObject || !agentObject.agent_id) {
@@ -164,12 +164,12 @@ class CSGClient {
           throw new Error(`应用 ${app_id} 在测试模式下未配置有效的app_secret作为AppKey`);
         }
         // 测试环境统一调用OpenAI格式的接口
-        return this.callTestEnvironmentAgent(base_url, finalAppKey, agentObject, message, options);
+        return this.callTestEnvironmentAgent(base_url, finalAppKey, agentObject, messages, options);
       } else {
         // 生产环境：动态获取AppKey
         finalAppKey = await this.getAppKey(app_id, app_secret, base_url);
         // 注意：生产环境的调用也需要 agentId
-        return this.callProductionEnvironmentAgent(base_url, app_id, agent_id, finalAppKey, message, options);
+        return this.callProductionEnvironmentAgent(base_url, app_id, agent_id, finalAppKey, messages, options);
       }
     } catch (error) {
       logger.error('智能体调用失败:', { error: error.message, stack: error.stack });
@@ -179,19 +179,24 @@ class CSGClient {
   }
   
   // 测试环境智能体调用（OpenAI格式）
-  async callTestEnvironmentAgent(apiBase, appKey, agent, message, options = {}) {
+  async callTestEnvironmentAgent(apiBase, appKey, agent, messages, options = {}) {
+    logger.info('正在调用外部大模型API(测试环境)', { agent_id: agent.agent_id, model: agent.model });
+    // 查找是否已存在 system prompt
+    const hasSystemPrompt = messages.some(m => m.role === 'system');
+    
+    let finalMessages = [...messages];
+
+    // 如果没有 system prompt，并且 options 中提供了，则添加一个
+    if (!hasSystemPrompt && options.systemPrompt) {
+      finalMessages.unshift({
+        role: 'system',
+        content: options.systemPrompt,
+      });
+    }
+
     const payload = {
       model: agent.model || 'deepseek-chat',
-      messages: [
-        {
-          role: 'system',
-          content: options.systemPrompt || '你是一个智能助手。'
-        },
-        {
-          role: 'user',
-          content: message
-        }
-      ],
+      messages: finalMessages,
       stream: options.stream || false,
       temperature: options.temperature || 0.7,
       max_tokens: options.maxTokens || 2000
@@ -221,9 +226,10 @@ class CSGClient {
   }
   
   // 生产环境智能体调用（内网平台格式）
-  async callProductionEnvironmentAgent(apiBase, appId, agentId, appKey, message, options = {}) {
+  async callProductionEnvironmentAgent(apiBase, appId, agentId, appKey, messages, options = {}) {
+    logger.info('正在调用外部大模型API(生产环境)', { agent_id: agentId, model: 'production_model' });
     const payload = {
-      messages: [{ role: 'user', content: message }],
+      messages: messages, // 直接使用完整的 messages 数组
       stream: options.stream || false,
       temperature: options.temperature || 0.7,
       maxTokens: options.maxTokens || 2000,
@@ -265,6 +271,12 @@ class CSGClient {
     // 使用环境对应的解析器
     const parser = getResponseParser();
     const parsed = parser.parseNonStreaming(response.data);
+
+    if (response.success) {
+      logger.info('模型调用成功', { agent_id: payload.model, response: parsed });
+    } else {
+      logger.error('模型调用出错', { agent_id: payload.model, error: response.message });
+    }
     
     return {
       success: response.success,
@@ -407,7 +419,7 @@ class CSGClient {
   // 测试连接
   async testConnection(agentObject) {
     try {
-      const response = await this.callAgent(agentObject, '测试连接', {
+      const response = await this.callAgent(agentObject, [{ role: 'user', content: '测试连接' }], {
         systemPrompt: '请简单回复"连接成功"以确认连接状态。'
       });
       
@@ -478,4 +490,4 @@ class CSGClient {
   }
 }
 
-module.exports = CSGClient;
+module.exports = new CSGClient();

@@ -193,6 +193,10 @@ async def create_records(
         # 准备记录数据
         records_data = [record.fields for record in request.records]
         
+        # --- 诊断代码开始 ---
+        logger.info(f"--- 运行时 dir(datasheet.records) ---: {dir(datasheet.records)}")
+        # --- 诊断代码结束 ---
+
         # 调用astral_vika的正确API
         result = await datasheet.records.acreate(records=records_data)
         
@@ -203,7 +207,7 @@ async def create_records(
         
         return {
             "success": True,
-            "data": result
+            "data": [r.to_dict() for r in result]
         }
         
     except Exception as e:
@@ -251,7 +255,7 @@ async def get_records(
             query_params['filter_by_formula'] = filter_formula
         
         # 调用astral_vika的正确API
-        records = await datasheet.records.all().aall()
+        records = await datasheet.records.all().filter(**query_params).aall()
         result = [record.to_dict() for record in records]
         
         # 设置缓存
@@ -288,11 +292,12 @@ async def get_record(
         result = await datasheet.records.aget(record_id)
         
         # 设置缓存
-        set_cache(cache_key, result)
+        result_dict = result.to_dict()
+        set_cache(cache_key, result_dict)
         
         return {
             "success": True,
-            "data": result,
+            "data": result_dict,
             "from_cache": False
         }
         
@@ -326,7 +331,7 @@ async def update_record(
         
         return {
             "success": True,
-            "data": result
+            "data": [r.to_dict() for r in result]
         }
         
     except Exception as e:
@@ -638,12 +643,12 @@ async def batch_operations(
                 if op_type == 'create_record':
                     datasheet = vika.datasheet(op_data['datasheet_id'])
                     result = await datasheet.records.acreate(records=op_data['records'])
-                    results.append({'success': True, 'data': result})
+                    results.append({'success': True, 'data': [r.to_dict() for r in result]})
                     
                 elif op_type == 'update_record':
                     datasheet = vika.datasheet(op_data['datasheet_id'])
                     result = await datasheet.records.aupdate(records=op_data['records'])
-                    results.append({'success': True, 'data': result})
+                    results.append({'success': True, 'data': [r.to_dict() for r in result]})
                     
                 elif op_type == 'delete_record':
                     datasheet = vika.datasheet(op_data['datasheet_id'])

@@ -4,7 +4,7 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../database/init');
+const { db } = require('../database/init');
 const logger = require('../utils/logger');
 const { asyncErrorHandler, ValidationError, NotFoundError, ConflictError } = require('../middleware/errorHandler');
 const { v4: uuidv4 } = require('uuid');
@@ -14,6 +14,7 @@ const { getCurrentEnvironment } = require('../config/environment');
  * 获取应用列表
  */
 router.get('/', asyncErrorHandler(async (req, res) => {
+  logger.info('GET /api/v1/applications - 收到请求', { query: req.query });
   
   const { page = 1, pageSize = 20, status, search } = req.query;
   const offset = (page - 1) * pageSize;
@@ -59,6 +60,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     });
     
     
+    logger.info('GET /api/v1/applications - 操作成功');
     res.json({
       success: true,
       code: 200,
@@ -76,7 +78,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取应用列表失败', { error: error.message });
+    logger.error('获取应用列表失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -86,6 +88,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
  */
 router.get('/:appId', asyncErrorHandler(async (req, res) => {
   const { appId } = req.params;
+  logger.info(`GET /api/v1/applications/${appId} - 收到请求`, { params: req.params });
   
   try {
     // 获取应用信息
@@ -109,6 +112,7 @@ router.get('/:appId', asyncErrorHandler(async (req, res) => {
     });
     
     
+    logger.info(`GET /api/v1/applications/${appId} - 操作成功`);
     res.json({
       success: true,
       code: 200,
@@ -121,6 +125,7 @@ router.get('/:appId', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
+    logger.error(`获取应用详情失败，appId: ${appId}`, { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -129,6 +134,9 @@ router.get('/:appId', asyncErrorHandler(async (req, res) => {
  * 注册新应用
  */
 router.post('/', asyncErrorHandler(async (req, res) => {
+  // 不记录 app_secret
+  logger.info('POST /api/v1/applications - 收到请求', { body: { app_id: req.body.app_id, app_name: req.body.app_name, description: req.body.description, base_url: req.body.base_url, environment_type: req.body.environment_type } });
+  
   const { app_id, app_name, description, base_url, app_secret, environment_type } = req.body;
   
   // 参数验证
@@ -179,7 +187,7 @@ router.post('/', asyncErrorHandler(async (req, res) => {
     });
     
     
-    logger.info('应用注册成功', { app_id, app_name });
+    logger.info(`POST /api/v1/applications - 操作成功，appId: ${app_id}`);
     
     res.status(201).json({
       success: true,
@@ -198,7 +206,7 @@ router.post('/', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('应用注册失败', { error: error.message });
+    logger.error('应用注册失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -208,8 +216,10 @@ router.post('/', asyncErrorHandler(async (req, res) => {
  */
 router.put('/:appId', asyncErrorHandler(async (req, res) => {
   const { appId } = req.params;
-  const { app_name, description, base_url, app_secret, status, environment_type } = req.body;
+  // 不记录 app_secret
+  logger.info(`PUT /api/v1/applications/${appId} - 收到请求`, { params: req.params, body: { app_name: req.body.app_name, description: req.body.description, base_url: req.body.base_url, status: req.body.status, environment_type: req.body.environment_type } });
   
+  const { app_name, description, base_url, app_secret, status, environment_type } = req.body;
   
   try {
     // 检查应用是否存在
@@ -305,7 +315,7 @@ router.put('/:appId', asyncErrorHandler(async (req, res) => {
     });
     
     
-    logger.info('应用更新成功', { app_id: appId });
+    logger.info(`PUT /api/v1/applications/${appId} - 操作成功`);
     
     res.json({
       success: true,
@@ -316,7 +326,7 @@ router.put('/:appId', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('应用更新失败', { app_id: appId, error: error.message });
+    logger.error('应用更新失败', { app_id: appId, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -326,6 +336,7 @@ router.put('/:appId', asyncErrorHandler(async (req, res) => {
  */
 router.delete('/:appId', asyncErrorHandler(async (req, res) => {
   const { appId } = req.params;
+  logger.info(`DELETE /api/v1/applications/${appId} - 收到请求`, { params: req.params });
   
   try {
     // 检查应用是否存在
@@ -361,7 +372,7 @@ router.delete('/:appId', asyncErrorHandler(async (req, res) => {
     });
     
     
-    logger.info('应用删除成功', { app_id: appId });
+    logger.info(`DELETE /api/v1/applications/${appId} - 操作成功`);
     
     res.json({
       success: true,
@@ -371,7 +382,7 @@ router.delete('/:appId', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('应用删除失败', { app_id: appId, error: error.message });
+    logger.error('应用删除失败', { app_id: appId, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -381,6 +392,7 @@ router.delete('/:appId', asyncErrorHandler(async (req, res) => {
  */
 router.post('/:appId/test', asyncErrorHandler(async (req, res) => {
   const { appId } = req.params;
+  logger.info(`POST /api/v1/applications/${appId}/test - 收到请求`, { params: req.params });
   
   try {
     // 获取应用信息
@@ -397,7 +409,7 @@ router.post('/:appId/test', asyncErrorHandler(async (req, res) => {
     
     
     // 测试连接（这里可以添加具体的连接测试逻辑）
-    logger.info('应用连接测试', { app_id: appId });
+    logger.info(`POST /api/v1/applications/${appId}/test - 操作成功`);
     
     res.json({
       success: true,
@@ -414,7 +426,7 @@ router.post('/:appId/test', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('应用连接测试失败', { app_id: appId, error: error.message });
+    logger.error('应用连接测试失败', { app_id: appId, error: error.message, stack: error.stack });
     throw error;
   }
 }));

@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
+import { api } from '@/lib/api';
 
 interface SystemConfig {
   system: {
@@ -23,6 +24,9 @@ interface SystemConfig {
     apiBase: string;
     spaceId: string;
     rateLimitQPS: number;
+    autoSyncEnabled?: boolean;
+    syncTime?: string;
+    syncIntervalDays?: number;
   };
   database: {
     type: string;
@@ -78,10 +82,15 @@ const SystemConfig: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<{ vika: boolean; agent: boolean }>({ vika: false, agent: false });
+  const [isAgentTesting, setIsAgentTesting] = useState(false);
   const [testResults, setTestResults] = useState<ConnectionTest | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [vikaSpaceConfig, setVikaSpaceConfig] = useState<any>(null);
   const [clearingCache, setClearingCache] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
+  const [syncTime, setSyncTime] = useState('02:00');
+  const [syncIntervalDays, setSyncIntervalDays] = useState<number | ''>(1);
 
   useEffect(() => {
     loadConfig();
@@ -95,6 +104,9 @@ const SystemConfig: React.FC = () => {
         const result = await response.json();
         setConfig(result.data);
         setOriginalConfig(JSON.parse(JSON.stringify(result.data)));
+        setAutoSyncEnabled(result.data.vika.autoSyncEnabled || false);
+        setSyncTime(result.data.vika.syncTime || '02:00');
+        setSyncIntervalDays(result.data.vika.syncIntervalDays || 1);
       } else {
         throw new Error('加载配置失败');
       }
@@ -182,9 +194,8 @@ const SystemConfig: React.FC = () => {
   const testAgentConnection = async () => {
     if (!config) return;
 
+    setIsAgentTesting(true);
     try {
-      setTesting(prev => ({ ...prev, agent: true }));
-      
       const currentEnv = config.system.environment;
       const agentConfig = config.agentPlatform[currentEnv];
       
@@ -195,20 +206,20 @@ const SystemConfig: React.FC = () => {
         },
         body: JSON.stringify({
           agentId: 'test-agent',
-          appId: agentConfig.appId,
-          appSecret: agentConfig.appSecret,
+          appId: (agentConfig as any).appId,
+          appSecret: (agentConfig as any).appSecret,
         }),
       });
 
       const result = await response.json();
       setTestResults(prev => ({ ...prev, agent: result.data }));
     } catch (error) {
-      setTestResults(prev => ({ 
-        ...prev, 
+      setTestResults(prev => ({
+        ...prev,
         agent: { success: false, message: `连接测试失败: ${error.message}` }
       }));
     } finally {
-      setTesting(prev => ({ ...prev, agent: false }));
+      setIsAgentTesting(false);
     }
   };
 
@@ -261,6 +272,70 @@ const SystemConfig: React.FC = () => {
       toast.error(`操作失败: ${error.message}`);
     } finally {
       setClearingCache(false);
+    }
+  };
+
+  const handleSyncTowers = async () => {
+    setSyncing(true);
+    try {
+      const result = await api.post('/sync/towers', {});
+      if (result.success) {
+        toast.success('手动同步杆塔数据成功');
+      } else {
+        throw new Error(result.message || '同步失败');
+      }
+    } catch (error) {
+      toast.error(`操作失败: ${error.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleAutoSyncToggle = async (checked: boolean) => {
+    try {
+      const result = await api.put('/vika-autoSyncEnabled', { value: checked });
+      if (result.success) {
+        setAutoSyncEnabled(checked);
+        toast.success(`自动同步已${checked ? '开启' : '关闭'}`);
+      } else {
+        throw new Error(result.message || '状态更新失败');
+      }
+    } catch (error) {
+      toast.error(`操作失败: ${error.message}`);
+    }
+  };
+
+  const handleSyncSettingChange = async (key: 'syncTime' | 'syncIntervalDays', value: string | number) => {
+    try {
+      // 前端预更新
+      if (key === 'syncTime') {
+        setSyncTime(value as string);
+      } else {
+        setSyncIntervalDays(value as number);
+      }
+
+      const result = await api.put(`/vika-${key}`, { value });
+      if (result.success) {
+        toast.success('同步设置更新成功');
+        // 成功后更新 config 状态以保持一致性
+        if (config) {
+          const newConfig = { ...config };
+          (newConfig.vika as any)[key] = value;
+          setConfig(newConfig);
+        }
+      } else {
+        throw new Error(result.message || '设置更新失败');
+      }
+    } catch (error) {
+      toast.error(`操作失败: ${error.message}`);
+      // 如果失败，则从 config 恢复原始值
+      if (config) {
+        if (key === 'syncTime') {
+          setSyncTime(config.vika.syncTime || '02:00');
+        } else {
+          setSyncIntervalDays(config.vika.syncIntervalDays || 1);
+        }
+      }
     }
   };
 
@@ -451,6 +526,69 @@ const SystemConfig: React.FC = () => {
               )}
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>维格表数据同步</CardTitle>
+              <CardDescription>手动或自动同步维格表数据到本地数据库</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center space-x-4">
+                <Button
+                  onClick={handleSyncTowers}
+                  disabled={syncing}
+                >
+                  {syncing ? '同步中...' : '手动同步杆塔数据'}
+                </Button>
+                <p className="text-sm text-gray-500">
+                  从维格表手动拉取最新的杆塔数据。
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="autoSyncVika"
+                  checked={autoSyncEnabled}
+                  onCheckedChange={handleAutoSyncToggle}
+                />
+               <Label htmlFor="autoSyncVika">启用维格表定时自动同步</Label>
+             </div>
+             {autoSyncEnabled && (
+               <div className="grid grid-cols-2 gap-4 mt-4 pl-8">
+                 <div>
+                   <Label htmlFor="syncTime" className="mb-2 block">每日同步时间</Label>
+                   <Input
+                     id="syncTime"
+                     type="time"
+                     value={syncTime}
+                     onChange={(e) => setSyncTime(e.target.value)}
+                     onBlur={(e) => handleSyncSettingChange('syncTime', e.target.value)}
+                     className="w-full"
+                   />
+                 </div>
+                 <div>
+                   <Label htmlFor="syncIntervalDays" className="mb-2 block">同步间隔（天）</Label>
+                   <Input
+                     id="syncIntervalDays"
+                     type="number"
+                     value={syncIntervalDays}
+                     onChange={(e) => setSyncIntervalDays(e.target.value === '' ? '' : Number(e.target.value))}
+                     onBlur={(e) => {
+                       const value = Number(e.target.value);
+                       if (value > 0) {
+                         handleSyncSettingChange('syncIntervalDays', value);
+                       } else {
+                         toast.error('同步间隔必须是大于0的数字');
+                         setSyncIntervalDays(config?.vika.syncIntervalDays || 1);
+                       }
+                     }}
+                     min="1"
+                     className="w-full"
+                   />
+                 </div>
+               </div>
+             )}
+           </CardContent>
+         </Card>
         </TabsContent>
 
         <TabsContent value="agent">
@@ -526,12 +664,12 @@ const SystemConfig: React.FC = () => {
                 </div>
                 
                 <div className="flex gap-2">
-                  <Button 
-                    onClick={testAgentConnection} 
-                    disabled={testing.agent}
+                  <Button
+                    onClick={testAgentConnection}
+                    disabled={isAgentTesting}
                     variant="outline"
                   >
-                    {testing.agent ? '测试中...' : '测试连接'}
+                    {isAgentTesting ? '测试中...' : '测试连接'}
                   </Button>
                   {testResults?.agent && (
                     <Badge variant={testResults.agent.success ? 'default' : 'destructive'}>

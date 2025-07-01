@@ -1,21 +1,59 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { CheckCircle, XCircle, Loader } from 'lucide-react';
 
 interface Message {
   sender: 'user' | 'bot';
   content: string;
 }
 
+const LOCAL_STORAGE_KEY = 'taskTesterState';
+
 const TaskTester: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [selectedSourceId, setSelectedSourceId] = useState<string>('');
   const [inputSources, setInputSources] = useState<any[]>([]);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // New states for task tracking
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [taskStatus, setTaskStatus] = useState<string | null>(null);
+  const [taskSteps, setTaskSteps] = useState<any[]>([]);
+  const [taskResult, setTaskResult] = useState<any | null>(null);
+  const [isPolling, setIsPolling] = useState<boolean>(false);
 
+  const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const pollTaskStatus = useCallback(async (currentTaskId: string) => {
+    if (!currentTaskId) return;
+    try {
+      const response = await fetch(`/api/v1/tasks/${currentTaskId}`);
+      const result = await response.json();
+
+      if (result.success) {
+        const task = result.data;
+        setTaskStatus(task.status);
+        setTaskSteps(task.steps || []);
+        setTaskResult(task.result || task.error);
+
+        const isFinalStatus = ['completed', 'failed', 'delegated'].includes(task.status);
+        if (!isFinalStatus) {
+          pollingTimeoutRef.current = setTimeout(() => pollTaskStatus(currentTaskId), 2000);
+        } else {
+          setIsPolling(false);
+        }
+      }
+    } catch (error) {
+      console.error('Polling failed:', error);
+      setTaskResult({ error: '轮询任务结果时发生错误。' });
+      setIsPolling(false);
+    }
+  }, []);
+
+  // Effect for loading state from localStorage on initial load
   useEffect(() => {
     const fetchInputSources = async () => {
       try {
@@ -30,51 +68,45 @@ const TaskTester: React.FC = () => {
     };
     fetchInputSources();
 
-    // Cleanup on unmount
+    const savedStateJSON = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (savedStateJSON) {
+      const savedState = JSON.parse(savedStateJSON);
+      setTaskId(savedState.taskId);
+      setTaskStatus(savedState.taskStatus);
+      setTaskSteps(savedState.taskSteps || []);
+      setTaskResult(savedState.taskResult);
+      setMessages(savedState.messages || []);
+      setSelectedSourceId(savedState.selectedSourceId || '');
+
+      const isFinalStatus = ['completed', 'failed', 'delegated'].includes(savedState.taskStatus);
+      if (savedState.taskId && !isFinalStatus) {
+        setIsPolling(true);
+        pollTaskStatus(savedState.taskId);
+      }
+    }
+    
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
       }
     };
-  }, []);
+  }, [pollTaskStatus]);
 
-  const pollTaskResult = (taskId: string) => {
-    let pollCount = 0;
-    const maxPolls = 30; // 30次 * 2秒 = 60秒超时
+  // Effect for persisting state to localStorage
+  useEffect(() => {
+    if (taskId) {
+      const stateToPersist = {
+        taskId,
+        taskStatus,
+        taskSteps,
+        taskResult,
+        messages,
+        selectedSourceId,
+      };
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(stateToPersist));
+    }
+  }, [taskId, taskStatus, taskSteps, taskResult, messages, selectedSourceId]);
 
-    const poll = async () => {
-      if (pollCount >= maxPolls) {
-        clearInterval(pollingIntervalRef.current!);
-        setMessages(prev => [...prev, { sender: 'bot', content: '任务超时，请稍后重试。' }]);
-        return;
-      }
-
-      try {
-        const response = await fetch(`/api/v1/tasks/${taskId}`);
-        const result = await response.json();
-
-        if (result.success) {
-          const task = result.data;
-          if (task.status === 'completed' || task.status === 'failed') {
-            clearInterval(pollingIntervalRef.current!);
-            pollingIntervalRef.current = null;
-            const output = task.status === 'failed'
-              ? `错误: ${task.error}`
-              : (typeof task.result === 'object' ? JSON.stringify(task.result, null, 2) : task.result);
-            setMessages(prev => [...prev, { sender: 'bot', content: output }]);
-          }
-        }
-      } catch (error) {
-        console.error('Polling failed:', error);
-        clearInterval(pollingIntervalRef.current!);
-        pollingIntervalRef.current = null;
-        setMessages(prev => [...prev, { sender: 'bot', content: '轮询任务结果时发生错误。' }]);
-      }
-      pollCount++;
-    };
-
-    pollingIntervalRef.current = setInterval(poll, 2000);
-  };
 
   const handleSend = async () => {
     if (!inputValue.trim() || !selectedSourceId) {
@@ -82,29 +114,52 @@ const TaskTester: React.FC = () => {
       return;
     }
 
+    if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+    }
+
     const userMessage: Message = { sender: 'user', content: inputValue };
-    setMessages(prev => [...prev, userMessage]);
+    setMessages([userMessage]); // Start with only the user message
     setInputValue('');
+    
+    // Reset previous task state
+    setTaskStatus('pending');
+    setTaskSteps([]);
+    setTaskResult(null);
+    setIsPolling(true);
 
     try {
       const response = await fetch(`/api/v1/tasks/trigger/${selectedSourceId}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: inputValue, context: { sourceType: 'manual_test' } }),
       });
 
       const result = await response.json();
 
       if (result.success && result.data.taskId) {
-        pollTaskResult(result.data.taskId);
+        const newTaskId = result.data.taskId;
+        setTaskId(newTaskId);
+        pollTaskStatus(newTaskId);
       } else {
-        setMessages(prev => [...prev, { sender: 'bot', content: `启动任务失败: ${result.message || '未知错误'}` }]);
+        setTaskResult({ error: `启动任务失败: ${result.message || '未知错误'}` });
+        setIsPolling(false);
       }
     } catch (error) {
       console.error('Failed to send message:', error);
-      setMessages(prev => [...prev, { sender: 'bot', content: '发送消息时发生网络错误。' }]);
+      setTaskResult({ error: '发送消息时发生网络错误。' });
+      setIsPolling(false);
+    }
+  };
+
+  const renderStepIcon = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircle className="text-green-500" />;
+      case 'failed':
+        return <XCircle className="text-red-500" />;
+      default:
+        return <Loader className="animate-spin text-blue-500" />;
     }
   };
 
@@ -132,16 +187,39 @@ const TaskTester: React.FC = () => {
           </div>
 
           <div className="h-96 border rounded-md p-4 overflow-y-auto bg-gray-50 space-y-4">
-            {messages.length === 0 ? (
-              <p className="text-gray-500">对话历史将显示在这里...</p>
-            ) : (
-              messages.map((msg, index) => (
-                <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${msg.sender === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
-                    {msg.content}
-                  </div>
+            {messages.map((msg, index) => (
+              <div key={index} className="flex justify-end">
+                <div className="max-w-xs lg:max-w-md px-4 py-2 rounded-lg bg-blue-500 text-white">
+                  {msg.content}
                 </div>
-              ))
+              </div>
+            ))}
+            
+            {taskId && (
+              <div className="space-y-2">
+                <h4 className="font-semibold">任务进度 (ID: {taskId})</h4>
+                <ul className="space-y-2">
+                  {taskSteps.map((step, index) => (
+                    <li key={index} className="flex items-center space-x-2 p-2 bg-white rounded-md border">
+                      {renderStepIcon(step.status)}
+                      <span className="flex-grow">{step.description}</span>
+                      <span className="text-xs text-gray-500">{step.status}</span>
+                    </li>
+                  ))}
+                </ul>
+                {!isPolling && taskResult && (
+                  <div className="mt-4 p-4 rounded-md bg-gray-100">
+                    <h4 className="font-bold mb-2">最终结果:</h4>
+                    <pre className="whitespace-pre-wrap break-all text-sm">
+                      {typeof taskResult === 'object' ? JSON.stringify(taskResult, null, 2) : taskResult}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {messages.length === 0 && !taskId && (
+              <p className="text-gray-500">对话历史和任务进度将显示在这里...</p>
             )}
           </div>
 
@@ -151,8 +229,11 @@ const TaskTester: React.FC = () => {
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}
               placeholder="输入你的消息..."
+              disabled={isPolling}
             />
-            <Button onClick={handleSend}>发送</Button>
+            <Button onClick={handleSend} disabled={isPolling}>
+              {isPolling ? '运行中...' : '发送'}
+            </Button>
           </div>
         </CardContent>
       </Card>

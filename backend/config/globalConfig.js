@@ -16,7 +16,11 @@ const defaultConfig = {
     userToken: 'uskoInjR7NrA4OfkL97qN37', // 用户token
     apiBase: 'https://api.vika.cn', // API地址
     spaceId: 'spcBxkW6UiuzT', // 默认空间站ID
-    rateLimitQPS: 2 // API请求频率限制
+    rateLimitQPS: 2, // API请求频率限制
+    autoSyncEnabled: false, // 是否启用自动同步
+    syncTime: '03:00',
+    syncIntervalDays: 1,
+    lastSyncTimestamp: 0
   },
   
   // 数据库配置
@@ -66,6 +70,11 @@ const defaultConfig = {
     enabled: true,
     ttl: 3600, // 缓存过期时间（秒）
     maxKeys: 1000 // 最大缓存键数量
+  },
+
+  // 外部服务配置
+  services: {
+    serperApiKey: '' // Serper API密钥
   }
 };
 

@@ -25,6 +25,10 @@ class VikaService {
   
   // 初始化服务
   async initService() {
+    this.sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const config = this.getConfig();
+    this.apiDelay = 1000 / (config.rateLimitQPS || 2);
+    
     try {
       // 创建axios实例
       this.apiClient = axios.create({
@@ -38,7 +42,12 @@ class VikaService {
       // 添加请求拦截器用于日志
       this.apiClient.interceptors.request.use(
         (config) => {
-          logger.debug(`维格表API请求: ${config.method?.toUpperCase()} ${config.url}`);
+          const requestInfo = {
+            method: config.method?.toUpperCase(),
+            url: config.url,
+            data: config.data,
+          };
+          logger.debug(`[VIKA_REQUEST_DEBUG] Request PARAMS: ${JSON.stringify(requestInfo)}`);
           return config;
         },
         (error) => {
@@ -50,6 +59,7 @@ class VikaService {
       // 添加响应拦截器
       this.apiClient.interceptors.response.use(
         (response) => {
+          logger.debug(`[VIKA_RESPONSE_DEBUG] Response DATA: ${JSON.stringify(response.data)}`);
           return response;
         },
         (error) => {
@@ -144,10 +154,12 @@ class VikaService {
   
   // 创建记录
   async createRecord(datasheetId, fields) {
+    logger.info('正在向维格表创建记录', { datasheetId });
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
-      logger.info('Saving data to Vika:', { datasheet_id: datasheetId, records: [{ fields }] });
+      logger.debug('发送到维格表的请求', { datasheet_id: datasheetId, records: [{ fields }] });
       const response = await this.apiClient.post('/records', {
         datasheet_id: datasheetId,
         records: [{ fields }]
@@ -173,12 +185,14 @@ class VikaService {
   
   // 批量创建记录
   async createRecords(datasheetId, recordsData) {
+    logger.info('正在向维格表批量创建记录', { datasheetId });
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
       const records = recordsData.map(data => ({ fields: data }));
       
-      logger.info('Saving data to Vika:', { datasheet_id: datasheetId, records: records });
+      logger.debug('发送到维格表的请求', { datasheet_id: datasheetId, records: records });
       const response = await this.apiClient.post('/records', {
         datasheet_id: datasheetId,
         records: records
@@ -203,9 +217,12 @@ class VikaService {
   
   // 获取记录
   async getRecord(datasheetId, recordId) {
+    logger.info('正在从维格表获取单条记录', { datasheetId, recordId });
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
+      logger.debug('发送到维格表的请求', { datasheetId, recordId });
       const response = await this.apiClient.get(`/records/${datasheetId}/${recordId}`);
       
       return this.handleApiResponse(response, `获取记录: ${datasheetId}/${recordId}`);
@@ -221,14 +238,17 @@ class VikaService {
   
   // 更新记录
   async updateRecord(datasheetId, recordId, fields) {
+    logger.info('正在更新维格表中的记录', { datasheetId, recordId });
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
-      logger.info('Saving data to Vika:', { datasheet_id: datasheetId, record_id: recordId, fields: fields });
-      const response = await this.apiClient.put('/records', {
-        datasheet_id: datasheetId,
-        record_id: recordId,
-        fields: fields
+      logger.debug('发送到维格表的请求', { datasheet_id: datasheetId, record_id: recordId, fields: fields });
+      const response = await this.apiClient.patch(`/records/${datasheetId}`, {
+        records: [{
+          record_id: recordId,
+          fields: fields
+        }]
       });
       
       const result = this.handleApiResponse(response, `更新记录: ${datasheetId}/${recordId}`);
@@ -252,9 +272,12 @@ class VikaService {
   
   // 删除记录
   async deleteRecord(datasheetId, recordId) {
+    logger.info('正在删除维格表中的记录', { datasheetId, recordId });
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
+      logger.debug('发送到维格表的请求', { datasheetId, recordId });
       const response = await this.apiClient.delete(`/records/${datasheetId}/${recordId}`);
       
       const result = this.handleApiResponse(response, `删除记录: ${datasheetId}/${recordId}`);
@@ -277,27 +300,32 @@ class VikaService {
   }
   
   // 获取记录列表
-  async getRecords(datasheetId, options = {}) {
+  async getRecords(datasheetId, params = {}) {
+    logger.info('正在从维格表获取记录列表', { datasheetId, params });
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
-      
-      const params = new URLSearchParams();
-      
-      if (options.viewId) params.append('view_id', options.viewId);
-      if (options.pageSize) params.append('page_size', options.pageSize.toString());
-      if (options.pageToken) params.append('page_token', options.pageToken);
-      if (options.filterFormula) params.append('filter_formula', options.filterFormula);
-      
-      const url = `/records/${datasheetId}${params.toString() ? '?' + params.toString() : ''}`;
-      const response = await this.apiClient.get(url);
-      
+
+      // 将JS风格的驼峰命名转换为Python风格的下划线命名
+      const apiParams = {
+        view_id: params.viewId,
+        page_size: params.pageSize,
+        page_token: params.pageToken,
+        filter_formula: params.filterByFormula, // 关键映射
+      };
+
+      // 移除所有值为 undefined 的键，以避免发送空参数
+      Object.keys(apiParams).forEach(key => apiParams[key] === undefined && delete apiParams[key]);
+
+      const response = await this.apiClient.get(`/records/${datasheetId}`, { params: apiParams });
+
       return this.handleApiResponse(response, `获取记录列表: ${datasheetId}`);
-      
+
     } catch (error) {
       logger.error(`获取记录列表失败: ${datasheetId}`, { error: error.message });
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -312,6 +340,7 @@ class VikaService {
     }
 
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
       const response = await this.apiClient.get(`/spaces/${spaceId}`);
@@ -342,6 +371,7 @@ class VikaService {
     }
 
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
       const response = await this.apiClient.get('/spaces');
@@ -372,6 +402,7 @@ class VikaService {
     }
 
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
       const response = await this.apiClient.get(`/spaces/${spaceId}/datasheets`);
@@ -395,6 +426,7 @@ class VikaService {
   // 获取视图列表
   async getViews(datasheetId) {
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
       const response = await this.apiClient.get(`/datasheets/${datasheetId}/views`);
@@ -420,6 +452,7 @@ class VikaService {
     }
 
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
       const response = await this.apiClient.get(`/datasheets/${datasheetId}/fields`);
@@ -450,6 +483,7 @@ class VikaService {
     }
 
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
       const response = await this.apiClient.get(`/spaces/${spaceId}/configuration`);
@@ -473,6 +507,7 @@ class VikaService {
   // 批量操作
   async batchOperations(operations) {
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       
       const response = await this.apiClient.post('/batch', {
@@ -574,6 +609,7 @@ class VikaService {
   // 测试连接
   async testConnection() {
     try {
+      await this.sleep(this.apiDelay);
       // 测试Python服务连接
       const healthResponse = await this.apiClient.get('/health');
       
@@ -616,6 +652,7 @@ class VikaService {
     }
 
     try {
+      await this.sleep(this.apiDelay);
       await this.ensureInitialized();
       const response = await this.apiClient.get('/health');
       
@@ -649,6 +686,7 @@ class VikaService {
   // 重新配置Python服务
   async reconfigurePythonService() {
     try {
+      await this.sleep(this.apiDelay);
       this.initialized = false;
       await this.initializePythonService();
       return {

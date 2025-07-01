@@ -4,26 +4,44 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../database/init');
+const { db } = require('../database/init');
 const logger = require('../utils/logger');
 const { asyncErrorHandler, ValidationError, NotFoundError, ConflictError } = require('../middleware/errorHandler');
 const CSGClient = require('../services/csgClient');
-const csgClientManager = new CSGClient();
+const csgClientManager = require('../services/csgClient');
 const { getCurrentEnvironment } = require('../config/environment');
 
 /**
  * 获取智能体列表
  */
 router.get('/', asyncErrorHandler(async (req, res) => {
-  
+  logger.info('GET /api/v1/agents - 收到请求', { query: req.query });
+
   const { page = 1, pageSize = 20, status, app_id, search } = req.query;
   const offset = (page - 1) * pageSize;
   
   let sql = `
     SELECT
       a.id, a.agent_id as "agentId", a.app_id, a.agent_name, a.responsibilities_and_functions,
-      a.capabilities, a.config, a.status, a.model,
-      a.created_at as "createdAt", app.app_name, app.base_url
+      a.config, a.status, a.model, a.created_at as "createdAt",
+      app.app_name, app.base_url,
+      (
+        SELECT JSON_GROUP_ARRAY(
+          JSON_OBJECT(
+            'capability_type', ac.capability_type,
+            'target_id', ac.target_id,
+            'target_name', ac.target_name,
+            'config', ac.config,
+            'displayName', CASE
+                              WHEN ac.capability_type = 'mcp_tool' THEN mt.display_name
+                              ELSE ac.target_name
+                            END
+          )
+        )
+        FROM agent_capabilities ac
+        LEFT JOIN mcp_tools mt ON ac.target_id = mt.tool_name AND ac.capability_type = 'mcp_tool'
+        WHERE ac.agent_id = a.agent_id
+      ) as capabilities_json
     FROM agents a
     LEFT JOIN applications app ON a.app_id = app.app_id
     WHERE 1=1
@@ -58,6 +76,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     params.push(`%${search}%`, `%${search}%`);
   }
   
+  sql += ' GROUP BY a.id';
   sql += ' ORDER BY a.created_at DESC LIMIT ? OFFSET ?';
   params.push(pageSize, offset);
   
@@ -81,11 +100,12 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     // 解析JSON字段
     const processedAgents = agents.map(agent => ({
       ...agent,
-      capabilities: agent.capabilities ? JSON.parse(agent.capabilities) : [],
+      capabilities: agent.capabilities_json ? JSON.parse(agent.capabilities_json) : [],
       config: agent.config ? JSON.parse(agent.config) : {}
     }));
     
     
+    logger.info('GET /api/v1/agents - 操作成功');
     res.json({
       success: true,
       code: 200,
@@ -103,7 +123,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取智能体列表失败', { error: error.message });
+    logger.error('获取智能体列表失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -113,14 +133,15 @@ router.get('/', asyncErrorHandler(async (req, res) => {
  */
 router.get('/:agentId', asyncErrorHandler(async (req, res) => {
   const { agentId } = req.params;
-  
+  logger.info(`GET /api/v1/agents/${agentId} - 收到请求`, { params: req.params });
+
   try {
     // 获取智能体信息
     const agent = await new Promise((resolve, reject) => {
       const sql = `
         SELECT
           a.id, a.agent_id as "agentId", a.app_id, a.agent_name, a.responsibilities_and_functions,
-          a.capabilities, a.config, a.status, a.model,
+          a.config, a.status, a.model,
           a.created_at as "createdAt",
           app.app_name, app.app_secret, app.base_url, app.environment_type
         FROM agents a
@@ -153,20 +174,21 @@ router.get('/:agentId', asyncErrorHandler(async (req, res) => {
     }));
     
     
+    logger.info(`GET /api/v1/agents/${agentId} - 操作成功`);
     res.json({
       success: true,
       code: 200,
       message: '获取智能体详情成功',
       data: {
         ...agent,
-        capabilities: agent.capabilities ? JSON.parse(agent.capabilities) : [],
         config: agent.config ? JSON.parse(agent.config) : {},
-        agent_capabilities: processedCapabilities
+        capabilities: processedCapabilities
       },
       timestamp: new Date().toISOString()
     });
     
   } catch (error) {
+    logger.error(`获取智能体详情失败，agentId: ${agentId}`, { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -175,6 +197,9 @@ router.get('/:agentId', asyncErrorHandler(async (req, res) => {
  * 注册新智能体 (已重构)
  */
 router.post('/', asyncErrorHandler(async (req, res) => {
+  // 请求体中包含敏感数据，仅记录非敏感字段
+  logger.info('POST /api/v1/agents - 收到请求', { body: { agent_id: req.body.agent_id, app_id: req.body.app_id, agent_name: req.body.agent_name, model: req.body.model } });
+
   const {
     agent_id,
     app_id,
@@ -216,12 +241,12 @@ router.post('/', asyncErrorHandler(async (req, res) => {
         // 1. 插入主表
         const configJson = config ? JSON.stringify(config) : '{}';
         const agentSql = `
-          INSERT INTO agents (agent_id, app_id, agent_name, responsibilities_and_functions, config, model, capabilities)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO agents (agent_id, app_id, agent_name, responsibilities_and_functions, config, model)
+          VALUES (?, ?, ?, ?, ?, ?)
         `;
         // 注意：capabilities 字段保留，但不再由这个API直接填充复杂逻辑，可以存空或基础信息
         await new Promise((resolve, reject) => {
-          db.run(agentSql, [agent_id, app_id, agent_name, responsibilities_and_functions || '', configJson, model, '[]'], function(err) {
+          db.run(agentSql, [agent_id, app_id, agent_name, responsibilities_and_functions || '', configJson, model], function(err) {
             if (err) reject(err); else resolve({ id: this.lastID });
           });
         });
@@ -255,7 +280,7 @@ router.post('/', asyncErrorHandler(async (req, res) => {
 
         db.run('COMMIT');
         
-        logger.info('智能体注册成功 (事务性)', { agent_id, app_id });
+        logger.info(`POST /api/v1/agents - 操作成功，agentId: ${agent_id}`);
         res.status(201).json({
           success: true,
           code: 201,
@@ -276,12 +301,13 @@ router.post('/', asyncErrorHandler(async (req, res) => {
 
       } catch (txError) {
         db.run('ROLLBACK');
-        logger.error('智能体注册事务失败', { error: txError.message });
+        logger.error('智能体注册事务失败', { error: txError.message, stack: txError.stack });
         throw txError; // 抛出给 asyncErrorHandler 处理
       }
     });
   } catch (error) {
-    logger.error('智能体注册失败', { error: error.message });
+    // 这个 catch 用于捕获事务开始前的验证错误
+    logger.error('智能体注册失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -291,6 +317,9 @@ router.post('/', asyncErrorHandler(async (req, res) => {
  */
 router.put('/:agentId', asyncErrorHandler(async (req, res) => {
   const { agentId } = req.params;
+  // 请求体中包含敏感数据，仅记录非敏感字段
+  logger.info(`PUT /api/v1/agents/${agentId} - 收到请求`, { params: req.params, body: { agent_name: req.body.agent_name, status: req.body.status, model: req.body.model } });
+
   const {
     agent_name,
     responsibilities_and_functions,
@@ -371,7 +400,7 @@ router.put('/:agentId', asyncErrorHandler(async (req, res) => {
         });
 
 
-        logger.info('智能体更新成功 (事务性)', { agent_id: agentId });
+        logger.info(`PUT /api/v1/agents/${agentId} - 操作成功`);
         res.json({
           success: true,
           code: 200,
@@ -387,12 +416,12 @@ router.put('/:agentId', asyncErrorHandler(async (req, res) => {
 
       } catch (txError) {
         db.run('ROLLBACK');
-        logger.error('智能体更新事务失败', { agent_id: agentId, error: txError.message });
+        logger.error('智能体更新事务失败', { agent_id: agentId, error: txError.message, stack: txError.stack });
         throw txError;
       }
     });
   } catch (error) {
-    logger.error('智能体更新失败', { agent_id: agentId, error: error.message });
+    logger.error('智能体更新失败', { agent_id: agentId, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -402,6 +431,7 @@ router.put('/:agentId', asyncErrorHandler(async (req, res) => {
  */
 router.delete('/:agentId', asyncErrorHandler(async (req, res) => {
   const { agentId } = req.params;
+  logger.info(`DELETE /api/v1/agents/${agentId} - 收到请求`, { params: req.params });
   
   try {
     // 检查智能体是否存在
@@ -424,12 +454,12 @@ router.delete('/:agentId', asyncErrorHandler(async (req, res) => {
       });
     });
     
-    const runningTaskCount = await new Promise((resolve, reject) => {
-      db.get('SELECT COUNT(*) as count FROM task_executions WHERE current_agent_id = ? AND status IN ("pending", "running")', [agentId], (err, row) => {
-        if (err) reject(err);
-        else resolve(row.count);
-      });
-    });
+const runningTaskCount = await new Promise((resolve, reject) => {
+  db.get('SELECT COUNT(*) as count FROM tasks WHERE agent_id = ? AND status IN ("pending", "running")', [agentId], (err, row) => {
+    if (err) reject(err);
+    else resolve(row ? row.count : 0);
+  });
+});
     
     if (inputSourceCount > 0) {
       throw new ConflictError('无法删除智能体，该智能体有关联的输入源');
@@ -448,7 +478,7 @@ router.delete('/:agentId', asyncErrorHandler(async (req, res) => {
     });
     
     
-    logger.info('智能体删除成功', { agent_id: agentId });
+    logger.info(`DELETE /api/v1/agents/${agentId} - 操作成功`);
     
     res.json({
       success: true,
@@ -458,7 +488,7 @@ router.delete('/:agentId', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('智能体删除失败', { agent_id: agentId, error: error.message });
+    logger.error('智能体删除失败', { agent_id: agentId, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -468,6 +498,7 @@ router.delete('/:agentId', asyncErrorHandler(async (req, res) => {
  */
 router.post('/:agentId/test', asyncErrorHandler(async (req, res) => {
   const { agentId } = req.params;
+  logger.info(`POST /api/v1/agents/${agentId}/test - 收到请求`, { params: req.params });
   
   try {
     // 获取智能体和应用信息
@@ -496,7 +527,7 @@ router.post('/:agentId/test', asyncErrorHandler(async (req, res) => {
       agentId
     );
     
-    logger.info('智能体连接测试完成', { agent_id: agentId, success: testResult.success });
+    logger.info(`POST /api/v1/agents/${agentId}/test - 操作成功`);
     
     const responsePayload = {
       success: testResult.success,
@@ -519,7 +550,7 @@ router.post('/:agentId/test', asyncErrorHandler(async (req, res) => {
     res.status(responsePayload.code).json(responsePayload);
     
   } catch (error) {
-    logger.error('智能体连接测试失败', { agent_id: agentId, error: error.message });
+    logger.error('智能体连接测试失败', { agent_id: agentId, error: error.message, stack: error.stack });
     res.json({ success: false, error: error.message });
   }
 }));

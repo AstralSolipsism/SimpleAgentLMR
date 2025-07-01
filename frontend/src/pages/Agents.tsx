@@ -1,10 +1,26 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Plus, Edit, Trash2, TestTube, Bot, Check, ChevronsUpDown, X } from 'lucide-react';
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 
+interface MCPTool {
+  id: string;
+  tool_name: string;
+  display_name?: string;
+  type: 'local' | 'remote';
+  description: string;
+}
 // New Agent interface
 interface Agent {
   id: string;
@@ -13,8 +29,9 @@ interface Agent {
   app_id: string;
   app_name: string;
   responsibilities_and_functions: string;
-  allowed_tool_names: string[];
-  subordinate_agent_ids: string[];
+  capabilities?: { capability_type: string; target_name: string; displayName?: string }[];
+  allowed_tools?: { name: string; displayName: string }[];
+  subordinate_agent_ids?: string[];
   status: 'active' | 'inactive' | 'error';
   createdAt: string;
   model?: string;
@@ -31,11 +48,13 @@ export function Agents() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [allAgentsForSelection, setAllAgentsForSelection] = useState<SimplifiedAgent[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
-  const [mcpTools, setMcpTools] = useState<any[]>([]);
+  const [mcpTools, setMcpTools] = useState<MCPTool[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  // const [showForm, setShowForm] = useState(false); // 旧状态，可以删除
+  const [isDialogOpen, setIsDialogOpen] = useState(false); // 新状态
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [selectedApplication, setSelectedApplication] = useState<any | null>(null);
+  const [testingStates, setTestingStates] = useState<{ [key: string]: boolean }>({});
   
   // Updated formData state
   const [formData, setFormData] = useState({
@@ -58,7 +77,7 @@ export function Agents() {
       const [agentsRes, appsRes, mcpRes] = await Promise.all([
         fetch('/api/v1/agents'),
         fetch('/api/v1/applications'),
-        fetch('/api/v1/mcp')
+        fetch('/api/v1/mcp/tools')
       ]);
       
       const [agentsApiResponse, appsApiResponse, mcpApiResponse] = await Promise.all([
@@ -69,9 +88,26 @@ export function Agents() {
       
       if (agentsApiResponse.success && agentsApiResponse.data) {
         const agentItems = agentsApiResponse.data.items || [];
-        setAgents(agentItems);
+        const processedData = agentItems.map((agent: any) => {
+          const allowed_tools: { name: string; displayName: string }[] = [];
+          const subordinate_agent_ids: string[] = [];
+          if (Array.isArray(agent.capabilities)) {
+            for (const cap of agent.capabilities) {
+              if (cap.capability_type === 'mcp_tool') {
+                allowed_tools.push({
+                  name: cap.target_name,
+                  displayName: cap.displayName || cap.target_name
+                });
+              } else if (cap.capability_type === 'sub_agent') {
+                subordinate_agent_ids.push(cap.target_name);
+              }
+            }
+          }
+          return { ...agent, allowed_tools, subordinate_agent_ids };
+        });
+        setAgents(processedData);
         // Populate the list for the subordinate agent selector
-        const simplifiedAgents = agentItems.map((agent: any) => ({
+        const simplifiedAgents = processedData.map((agent: any) => ({
           id: agent.agentId,
           name: agent.agent_name,
         }));
@@ -81,7 +117,7 @@ export function Agents() {
         setApplications(appsApiResponse.data.items || []);
       }
       if (mcpApiResponse.success && mcpApiResponse.data) {
-        setMcpTools(mcpApiResponse.data.items || []);
+        setMcpTools(mcpApiResponse.data.tools || []);
       }
     } catch (error) {
       console.error('Failed to fetch data:', error);
@@ -119,7 +155,7 @@ export function Agents() {
 
       if (response.ok) {
         await fetchData();
-        setShowForm(false);
+        setIsDialogOpen(false); // 替换 setShowForm(false)
         setEditingAgent(null);
         resetForm();
       } else {
@@ -130,6 +166,13 @@ export function Agents() {
     } catch (error) {
       console.error('Failed to save agent:', error);
     }
+  };
+
+  // 处理“添加”
+  const handleAddNew = () => {
+    resetForm();
+    setEditingAgent(null);
+    setIsDialogOpen(true); // 使用新状态
   };
 
   // Updated resetForm
@@ -156,11 +199,11 @@ export function Agents() {
       agentId: agent.agentId,
       app_id: agent.app_id,
       responsibilities_and_functions: agent.responsibilities_and_functions || '',
-      allowed_tool_names: agent.allowed_tool_names || [],
+      allowed_tool_names: agent.allowed_tools?.map(t => t.name) || [],
       subordinate_agent_ids: agent.subordinate_agent_ids || [],
       model: agent.model || ''
     });
-    setShowForm(true);
+    setIsDialogOpen(true); // 使用新状态
   };
 
   const handleDelete = async (agentId: string) => {
@@ -175,12 +218,15 @@ export function Agents() {
   };
 
   const testConnection = async (agentId: string) => {
+    setTestingStates(prev => ({ ...prev, [agentId]: true }));
     try {
       const response = await fetch(`/api/v1/agents/${agentId}/test`, { method: 'POST' });
       const result = await response.json();
       alert(result.success ? '连接测试成功' : `连接测试失败: ${result.error}`);
     } catch (error) {
       alert('连接测试失败');
+    } finally {
+      setTestingStates(prev => ({ ...prev, [agentId]: false }));
     }
   };
 
@@ -194,11 +240,7 @@ export function Agents() {
           </p>
         </div>
         <button
-          onClick={() => {
-            resetForm();
-            setEditingAgent(null);
-            setShowForm(true);
-          }}
+          onClick={handleAddNew}
           className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
         >
           <Plus className="h-4 w-4 mr-2" />
@@ -206,141 +248,119 @@ export function Agents() {
         </button>
       </div>
 
-      {/* Agent form modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-screen overflow-y-auto">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-medium text-gray-900">
-                {editingAgent ? '编辑智能体' : '添加智能体'}
-              </h3>
-            </div>
-            <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">智能体名称</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.agent_name}
-                    onChange={(e) => setFormData({ ...formData, agent_name: e.target.value })}
-                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Agent ID</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.agentId}
-                    onChange={(e) => setFormData({ ...formData, agentId: e.target.value })}
-                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              </div>
-              
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingAgent ? '编辑智能体' : '添加智能体'}</DialogTitle>
+            <DialogDescription>
+              在这里定义智能体的所有属性，包括它的核心职责和所能使用的工具。
+            </DialogDescription>
+          </DialogHeader>
+          
+          <form onSubmit={handleSubmit} className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">所属应用</label>
-                <select
+                <label className="block text-sm font-medium text-gray-700">智能体名称</label>
+                <input
+                  type="text"
                   required
-                  value={formData.app_id}
-                  onChange={(e) => {
-                    const selectedApp = applications.find(app => app.app_id === e.target.value);
-                    setSelectedApplication(selectedApp || null);
-                    setFormData({ ...formData, app_id: e.target.value, model: '' });
-                  }}
+                  value={formData.agent_name}
+                  onChange={(e) => setFormData({ ...formData, agent_name: e.target.value })}
                   className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">选择应用</option>
-                  {applications.map((app) => (
-                    <option key={app.app_id} value={app.app_id}>{app.app_name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {selectedApplication?.environment_type === 'test' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Model</label>
-                  <input
-                    type="text"
-                    value={formData.model}
-                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="例如: csg-pro"
-                  />
-                </div>
-              )}
-
-              {/* Updated Description to Responsibilities & Functions */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700">职责与功能</label>
-                <textarea
-                  value={formData.responsibilities_and_functions}
-                  onChange={(e) => setFormData({ ...formData, responsibilities_and_functions: e.target.value })}
-                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                  rows={3}
-                  placeholder="定义智能体的核心职责、功能和行为准则..."
                 />
               </div>
-
-              {/* New Subordinate Agents Selector */}
               <div>
-                <label className="block text-sm font-medium text-gray-700">可传递的下级</label>
+                <label className="block text-sm font-medium text-gray-700">Agent ID</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.agentId}
+                  onChange={(e) => setFormData({ ...formData, agentId: e.target.value })}
+                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700">所属应用</label>
+              <select
+                required
+                value={formData.app_id}
+                onChange={(e) => {
+                  const selectedApp = applications.find(app => app.app_id === e.target.value);
+                  setSelectedApplication(selectedApp || null);
+                  setFormData({ ...formData, app_id: e.target.value, model: '' });
+                }}
+                className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">选择应用</option>
+                {applications.map((app) => (
+                  <option key={app.app_id} value={app.app_id}>{app.app_name}</option>
+                ))}
+              </select>
+            </div>
+
+            {selectedApplication?.environment_type === 'test' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Model</label>
+                <input
+                  type="text"
+                  value={formData.model}
+                  onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                  className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="例如: csg-pro"
+                />
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="responsibilities" className="block text-sm font-medium text-gray-700">职责与功能</label>
+              <Textarea
+                id="responsibilities"
+                value={formData.responsibilities_and_functions}
+                onChange={(e) => setFormData({ ...formData, responsibilities_and_functions: e.target.value })}
+                className="mt-1 block w-full"
+                rows={10}
+                placeholder="定义智能体的核心职责、功能和行为准则..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">可传递的下级</label>
+              <MultiSelectCombobox
+                options={allAgentsForSelection.filter(agent => agent.id !== formData.agentId)}
+                selectedValues={formData.subordinate_agent_ids}
+                onChange={(selected) => setFormData({ ...formData, subordinate_agent_ids: selected })}
+                placeholder="选择下级智能体..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">允许调用的工具</label>
+              <div className="mt-2">
                 <MultiSelectCombobox
-                  options={allAgentsForSelection.filter(agent => agent.id !== formData.agentId)}
-                  selectedValues={formData.subordinate_agent_ids}
-                  onChange={(selected) => setFormData({ ...formData, subordinate_agent_ids: selected })}
-                  placeholder="选择下级智能体..."
+                  options={mcpTools.map(tool => ({
+                    id: tool.tool_name,
+                    name: tool.display_name || tool.tool_name
+                  }))}
+                  selectedValues={formData.allowed_tool_names}
+                  onChange={(selected) => setFormData({ ...formData, allowed_tool_names: selected })}
+                  placeholder="选择允许调用的工具..."
                 />
               </div>
-
-              {/* Updated Tools Selector */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700">允许调用的工具</label>
-                <div className="mt-2 space-y-2">
-                  {mcpTools.map((tool) => (
-                    <label key={tool.id} className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={formData.allowed_tool_names.includes(tool.name)}
-                        onChange={(e) => {
-                          const toolName = tool.name;
-                          const newSelection = e.target.checked
-                            ? [...formData.allowed_tool_names, toolName]
-                            : formData.allowed_tool_names.filter(name => name !== toolName);
-                          setFormData({ ...formData, allowed_tool_names: newSelection });
-                        }}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <span className="ml-2 text-sm text-gray-700">{tool.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForm(false);
-                    setEditingAgent(null);
-                    resetForm();
-                  }}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-                >
-                  {editingAgent ? '更新' : '创建'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            </div>
+            
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                取消
+              </Button>
+              <Button type="submit">
+                {editingAgent ? '更新' : '创建'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Agents grid - Updated display */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -380,11 +400,11 @@ export function Agents() {
                 <div className="mt-4">
                   <h4 className="text-xs font-medium text-gray-500">工具</h4>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {agent.allowed_tool_names?.length > 0 ? agent.allowed_tool_names.slice(0, 5).map((tool, index) => (
-                      <Badge key={index} variant="secondary">{tool}</Badge>
+                    {agent.allowed_tools?.length > 0 ? agent.allowed_tools.slice(0, 5).map((tool, index) => (
+                      <Badge key={index} variant="secondary">{tool.displayName}</Badge>
                     )) : <span className="text-xs text-gray-400">无</span>}
-                     {agent.allowed_tool_names?.length > 5 && (
-                      <Badge variant="outline">+{agent.allowed_tool_names.length - 5}</Badge>
+                     {agent.allowed_tools?.length > 5 && (
+                      <Badge variant="outline">+{agent.allowed_tools.length - 5}</Badge>
                     )}
                   </div>
                 </div>
@@ -407,10 +427,11 @@ export function Agents() {
                   <div className="flex space-x-2">
                     <button
                       onClick={() => testConnection(agent.agentId)}
-                      className="inline-flex items-center px-3 py-1 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50"
+                      disabled={testingStates[agent.agentId]}
+                      className="inline-flex items-center px-3 py-1 border border-gray-300 text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 disabled:bg-gray-200 disabled:cursor-not-allowed"
                     >
                       <TestTube className="h-3 w-3 mr-1" />
-                      测试
+                      {testingStates[agent.agentId] ? '测试中...' : '测试'}
                     </button>
                   </div>
                   <div className="flex space-x-2">

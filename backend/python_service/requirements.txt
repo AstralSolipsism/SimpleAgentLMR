@@ -1,7 +1,7 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.8.2
-astral_vika
+astral_vika==1.1.1
 python-multipart==0.0.6
 
 aiohttp

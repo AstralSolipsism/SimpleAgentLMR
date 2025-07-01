@@ -1,8 +1,4 @@
-/**
- * A2A智能体调度系统后端服务
- * 日期: 2025-06-24
- */
-
+// backend/app.js
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -14,7 +10,8 @@ const WebSocket = require('ws');
 // 导入配置和工具
 const config = require('./config/config');
 const logger = require('./utils/logger');
-const db = require('./database/init');
+const { db, initPromise: dbInitPromise } = require('./database/init'); // 引入数据库实例和初始化Promise
+const mcpManager = require('./services/mcpManager'); // 引入MCP管理器
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { rateLimiter } = require('./middleware/rateLimiter');
 
@@ -25,13 +22,14 @@ const agentRoutes = require('./routes/agents');
 const mcpRoutes = require('./routes/mcp');
 const visualizationRoutes = require('./routes/visualization');
 const dbViewerRoutes = require('./routes/dbViewer');
+const dataSyncRoutes = require('./routes/dataSync');
 
 // 创建Express应用
 const app = express();
 const server = createServer(app);
 
 // WebSocket服务器
-const wss = new WebSocket.Server({ 
+const wss = new WebSocket.Server({
   server,
   path: '/ws'
 });
@@ -57,7 +55,16 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
+// 创建一个流，将 morgan 的输出重定向到 winston 的 trace 级别
+const morganStream = {
+  write: (message) => {
+    // 使用 trim() 移除 morgan 添加的额外换行符
+    logger.trace(message.trim());
+  },
+};
+
+// 使用自定义流配置 morgan
+app.use(morgan('combined', { stream: morganStream }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -74,6 +81,7 @@ app.use('/api/v1/agents', agentRoutes);
 app.use('/api/v1/mcp', mcpRoutes);
 app.use('/api/v1/visualization', visualizationRoutes);
 app.use('/api/v1/db-viewer', dbViewerRoutes);
+app.use('/api/v1', dataSyncRoutes);
 
 // 健康检查端点
 app.get('/health', (req, res) => {
@@ -159,15 +167,20 @@ const gracefulShutdown = (signal) => {
   logger.info(`收到 ${signal} 信号，开始优雅关闭`);
   server.close(() => {
     logger.info('HTTP服务器已关闭');
-    db.close((err) => {
-      if (err) {
-        logger.error('关闭数据库连接失败', { error: err.message });
-        process.exit(1);
-      } else {
-        logger.info('数据库连接已成功关闭');
-        process.exit(0);
-      }
-    });
+    if (db) {
+      db.close((err) => {
+        if (err) {
+          logger.error('关闭数据库连接失败', { error: err.message });
+          process.exit(1);
+        } else {
+          logger.info('数据库连接已成功关闭');
+          process.exit(0);
+        }
+      });
+    } else {
+      logger.info('数据库未初始化，无需关闭');
+      process.exit(0);
+    }
   });
 };
 
@@ -186,19 +199,37 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // 启动服务器
-const startServer = () => {
-  // 数据库连接和初始化已在 a./database/init.js 中处理
-  // 我们只需要确保 db 对象已成功创建
-  // 如果在 init.js 中发生错误，进程会退出，所以这里可以假设连接是成功的
-  
-  const port = process.env.PORT || config.server.port;
-  server.listen(port, () => {
-    logger.info(`A2A智能体调度系统启动成功`, {
-      port,
-      environment: process.env.NODE_ENV || 'development',
-      pid: process.pid
+const startServer = async () => {
+  try {
+    // 1. 等待数据库完全初始化
+    logger.info('正在初始化数据库...');
+    await dbInitPromise; // 等待数据库初始化Promise解析
+    logger.info('数据库初始化完成。');
+
+    // 2. 在数据库就绪后，再初始化MCP管理器
+    logger.info('正在初始化MCP管理器...');
+    await mcpManager.initialize();
+    logger.info('MCP管理器初始化完成。');
+
+    // 初始化并启动定时任务调度器
+    logger.info('正在初始化定时任务调度器...');
+    const scheduler = require('./services/scheduler');
+    scheduler.start();
+    logger.info('定时任务调度器初始化完成。');
+
+    // 3. 启动服务器
+    const port = process.env.PORT || config.server.port;
+    server.listen(port, () => {
+      logger.info(`A2A智能体调度系统启动成功`, {
+        port,
+        environment: process.env.NODE_ENV || 'development',
+        pid: process.pid
+      });
     });
-  });
+  } catch (error) {
+    logger.error('服务器启动失败', { error: error.message, stack: error.stack });
+    process.exit(1);
+  }
 };
 
 // 如果直接运行此文件，则启动服务器

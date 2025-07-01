@@ -4,7 +4,7 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../database/init');
+const { db } = require('../database/init');
 const logger = require('../utils/logger');
 const { asyncErrorHandler, ValidationError, NotFoundError } = require('../middleware/errorHandler');
 const vikaService = require('../services/vikaService');
@@ -28,6 +28,7 @@ const findNodeById = (nodes, id) => {
  * 获取输出配置列表
  */
 router.get('/', asyncErrorHandler(async (req, res) => {
+  logger.info(`GET /api/v1/output-configs - Request received`, { query: req.query });
   
   const { page = 1, pageSize = 20, status, output_type } = req.query;
   const offset = (page - 1) * pageSize;
@@ -76,6 +77,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
       field_mapping: config.field_mapping ? JSON.parse(config.field_mapping) : {}
     }));
     
+    logger.info(`GET /api/v1/output-configs - Operation successful`);
     res.json({
       success: true,
       code: 200,
@@ -93,7 +95,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('获取输出配置列表失败', { error: error.message });
+    logger.error('获取输出配置列表失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -103,6 +105,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
  */
 router.get('/:id', asyncErrorHandler(async (req, res) => {
   const { id } = req.params;
+  logger.info(`GET /api/v1/output-configs/${id} - Request received`, { params: req.params });
   
   try {
     const outputConfig = await new Promise((resolve, reject) => {
@@ -116,6 +119,7 @@ router.get('/:id', asyncErrorHandler(async (req, res) => {
       throw new NotFoundError('输出配置不存在');
     }
     
+    logger.info(`GET /api/v1/output-configs/${id} - Operation successful`);
     res.json({
       success: true,
       code: 200,
@@ -128,6 +132,7 @@ router.get('/:id', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
+    logger.error(`获取输出配置详情失败 for id: ${id}`, { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -136,7 +141,7 @@ router.get('/:id', asyncErrorHandler(async (req, res) => {
  * 创建输出配置
  */
 router.post('/', asyncErrorHandler(async (req, res) => {
-  logger.info('Creating output config with data:', req.body);
+  logger.info(`POST /api/v1/output-configs - Request received`, { body: req.body });
   // 参数验证
   if (!req.body.config_name || !req.body.output_type || !req.body.vika_space_id) {
     throw new ValidationError('配置名称、输出类型和维格表空间ID不能为空');
@@ -241,7 +246,7 @@ router.post('/', asyncErrorHandler(async (req, res) => {
       throw new NotFoundError('创建配置后无法立即找到该配置');
     }
     
-    logger.info('输出配置创建成功，从数据库返回的完整对象为:', newConfig);
+    logger.info(`POST /api/v1/output-configs - Operation successful for id: ${newConfig.id}`);
     
     res.status(201).json({
       success: true,
@@ -255,7 +260,7 @@ router.post('/', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('输出配置创建失败', { error: error.message });
+    logger.error('输出配置创建失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -264,8 +269,8 @@ router.post('/', asyncErrorHandler(async (req, res) => {
  * 更新输出配置
  */
 router.put('/:id', asyncErrorHandler(async (req, res) => {
-  logger.info(`Updating output config ${req.params.id} with data:`, req.body);
   const { id } = req.params;
+  logger.info(`PUT /api/v1/output-configs/${id} - Request received`, { params: req.params, body: req.body });
   const {
     config_name, 
     description,
@@ -389,7 +394,7 @@ router.put('/:id', asyncErrorHandler(async (req, res) => {
       });
     });
     
-    logger.info('输出配置更新成功', { id });
+    logger.info(`PUT /api/v1/output-configs/${id} - Operation successful`);
     
     res.json({
       success: true,
@@ -403,7 +408,7 @@ router.put('/:id', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('输出配置更新失败', { id, error: error.message });
+    logger.error('输出配置更新失败', { id, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -413,6 +418,7 @@ router.put('/:id', asyncErrorHandler(async (req, res) => {
  */
 router.delete('/:id', asyncErrorHandler(async (req, res) => {
   const { id } = req.params;
+  logger.info(`DELETE /api/v1/output-configs/${id} - Request received`, { params: req.params });
   
   try {
     // 检查配置是否存在
@@ -435,7 +441,7 @@ router.delete('/:id', asyncErrorHandler(async (req, res) => {
       });
     });
     
-    logger.info('输出配置删除成功', { id, config_name: existingConfig.config_name });
+    logger.info(`DELETE /api/v1/output-configs/${id} - Operation successful`);
     
     res.json({
       success: true,
@@ -445,7 +451,7 @@ router.delete('/:id', asyncErrorHandler(async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('输出配置删除失败', { id, error: error.message });
+    logger.error('输出配置删除失败', { id, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -456,6 +462,7 @@ router.delete('/:id', asyncErrorHandler(async (req, res) => {
 router.post('/:id/test', asyncErrorHandler(async (req, res) => {
   const { id } = req.params;
   const { test_data } = req.body;
+  logger.info(`POST /api/v1/output-configs/${id}/test - Request received`, { params: req.params, body: req.body });
   
   try {
     // 获取配置信息
@@ -482,7 +489,7 @@ router.post('/:id/test', asyncErrorHandler(async (req, res) => {
     try {
       const result = await vikaService.writeToOutput(outputConfig, testData);
       
-      logger.info('输出配置测试成功', { id, config_name: outputConfig.config_name });
+      logger.info(`POST /api/v1/output-configs/${id}/test - Operation successful`);
       
       res.json({
         success: true,
@@ -500,6 +507,7 @@ router.post('/:id/test', asyncErrorHandler(async (req, res) => {
       });
       
     } catch (error) {
+      logger.error(`输出配置测试写入失败 for id: ${id}`, { error: error.message, stack: error.stack });
       res.json({
         success: false,
         code: 500,
@@ -515,7 +523,7 @@ router.post('/:id/test', asyncErrorHandler(async (req, res) => {
     }
     
   } catch (error) {
-    logger.error('输出配置测试失败', { id, error: error.message });
+    logger.error('输出配置测试失败', { id, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -525,6 +533,7 @@ router.post('/:id/test', asyncErrorHandler(async (req, res) => {
  */
 router.get('/vika/spaces/:spaceId/datasheets', asyncErrorHandler(async (req, res) => {
   const { spaceId } = req.params;
+  logger.info(`GET /api/v1/output-configs/vika/spaces/${spaceId}/datasheets - Request received`, { params: req.params });
   
   try {
     const datasheetsResult = await vikaService.getDatasheets(spaceId);
@@ -532,6 +541,7 @@ router.get('/vika/spaces/:spaceId/datasheets', asyncErrorHandler(async (req, res
       throw new Error(datasheetsResult.error || '获取维格表数据表列表失败');
     }
     
+    logger.info(`GET /api/v1/output-configs/vika/spaces/${spaceId}/datasheets - Operation successful`);
     res.json({
       success: true,
       code: 200,
@@ -541,7 +551,7 @@ router.get('/vika/spaces/:spaceId/datasheets', asyncErrorHandler(async (req, res
     });
     
   } catch (error) {
-    logger.error('获取维格表数据表列表失败', { spaceId, error: error.message });
+    logger.error('获取维格表数据表列表失败', { spaceId, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -551,6 +561,7 @@ router.get('/vika/spaces/:spaceId/datasheets', asyncErrorHandler(async (req, res
  */
 router.get('/vika/spaces/:spaceId?', asyncErrorHandler(async (req, res) => {
   const { spaceId } = req.params;
+  logger.info(`GET /api/v1/output-configs/vika/spaces/${spaceId || ''} - Request received`, { params: req.params });
 
   try {
     if (spaceId) {
@@ -559,6 +570,7 @@ router.get('/vika/spaces/:spaceId?', asyncErrorHandler(async (req, res) => {
       if (!spaceInfo.success) {
         throw new Error(spaceInfo.error || '获取维格表空间信息失败');
       }
+      logger.info(`GET /api/v1/output-configs/vika/spaces/${spaceId} - Operation successful`);
       res.json({
         success: true,
         code: 200,
@@ -572,6 +584,7 @@ router.get('/vika/spaces/:spaceId?', asyncErrorHandler(async (req, res) => {
       if (!spacesResult.success) {
         throw new Error(spacesResult.error || '获取维格表空间列表失败');
       }
+      logger.info(`GET /api/v1/output-configs/vika/spaces - Operation successful`);
       res.json({
         success: true,
         code: 200,
@@ -581,7 +594,7 @@ router.get('/vika/spaces/:spaceId?', asyncErrorHandler(async (req, res) => {
       });
     }
   } catch (error) {
-    logger.error('获取维格表空间信息或列表失败', { spaceId, error: error.message });
+    logger.error('获取维格表空间信息或列表失败', { spaceId, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -591,6 +604,7 @@ router.get('/vika/spaces/:spaceId?', asyncErrorHandler(async (req, res) => {
  */
 router.get('/vika/datasheets/:datasheetId/fields', asyncErrorHandler(async (req, res) => {
   const { datasheetId } = req.params;
+  logger.info(`GET /api/v1/output-configs/vika/datasheets/${datasheetId}/fields - Request received`, { params: req.params });
   
   try {
     const fieldsResult = await vikaService.getFields(datasheetId);
@@ -598,6 +612,7 @@ router.get('/vika/datasheets/:datasheetId/fields', asyncErrorHandler(async (req,
       throw new Error(fieldsResult.error || '获取维格表数据表字段失败');
     }
     
+    logger.info(`GET /api/v1/output-configs/vika/datasheets/${datasheetId}/fields - Operation successful`);
     res.json({
       success: true,
       code: 200,
@@ -607,7 +622,7 @@ router.get('/vika/datasheets/:datasheetId/fields', asyncErrorHandler(async (req,
     });
     
   } catch (error) {
-    logger.error('获取维格表数据表字段失败', { datasheetId, error: error.message });
+    logger.error('获取维格表数据表字段失败', { datasheetId, error: error.message, stack: error.stack });
     throw error;
   }
 }));
@@ -616,9 +631,10 @@ router.get('/vika/datasheets/:datasheetId/fields', asyncErrorHandler(async (req,
  * 手动清除维格表缓存
  */
 router.post('/vika/clear-cache', asyncErrorHandler(async (req, res) => {
+  logger.info('POST /api/v1/output-configs/vika/clear-cache - Request received');
   try {
     await vikaService.clearAllCache();
-    logger.info('维格表缓存已通过API请求手动清除');
+    logger.info('POST /api/v1/output-configs/vika/clear-cache - Operation successful');
     res.json({
       success: true,
       code: 200,
@@ -626,7 +642,7 @@ router.post('/vika/clear-cache', asyncErrorHandler(async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('手动清除维格表缓存失败', { error: error.message });
+    logger.error('手动清除维格表缓存失败', { error: error.message, stack: error.stack });
     throw error;
   }
 }));

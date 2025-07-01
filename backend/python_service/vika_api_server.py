@@ -55,10 +55,12 @@ class RecordCreate(BaseModel):
     datasheet_id: str
     records: List[RecordData]
 
-class RecordUpdate(BaseModel):
-    datasheet_id: str
+class RecordUpdateData(BaseModel):
     record_id: str
     fields: Dict[str, Any]
+
+class RecordUpdate(BaseModel):
+    records: List[RecordUpdateData]
 
 class RecordQuery(BaseModel):
     datasheet_id: str
@@ -193,6 +195,10 @@ async def create_records(
         # 准备记录数据
         records_data = [record.fields for record in request.records]
         
+        # --- 诊断代码开始 ---
+        logger.info(f"--- 运行时 dir(datasheet.records) ---: {dir(datasheet.records)}")
+        # --- 诊断代码结束 ---
+
         # 调用astral_vika的正确API
         result = await datasheet.records.acreate(records=records_data)
         
@@ -203,7 +209,7 @@ async def create_records(
         
         return {
             "success": True,
-            "data": result
+            "data": [r.to_dict() for r in result]
         }
         
     except Exception as e:
@@ -248,10 +254,10 @@ async def get_records(
         if page_token:
             query_params['page_token'] = page_token
         if filter_formula:
-            query_params['filter_by_formula'] = filter_formula
+            query_params['formula'] = filter_formula
         
         # 调用astral_vika的正确API
-        records = await datasheet.records.all().aall()
+        records = await datasheet.records.all().filter(**query_params).aall()
         result = [record.to_dict() for record in records]
         
         # 设置缓存
@@ -288,11 +294,12 @@ async def get_record(
         result = await datasheet.records.aget(record_id)
         
         # 设置缓存
-        set_cache(cache_key, result)
+        result_dict = result.to_dict()
+        set_cache(cache_key, result_dict)
         
         return {
             "success": True,
-            "data": result,
+            "data": result_dict,
             "from_cache": False
         }
         
@@ -300,33 +307,35 @@ async def get_record(
         logger.error(f"获取记录失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取记录失败: {str(e)}")
 
-@app.put("/records")
+@app.patch("/records/{datasheet_id}")
 async def update_record(
+    datasheet_id: str,
     request: RecordUpdate,
     vika: Vika = Depends(get_vika_client),
     _: None = Depends(rate_limit_check)
 ):
     """更新记录"""
     try:
-        datasheet = vika.datasheet(request.datasheet_id)
+        datasheet = vika.datasheet(datasheet_id)
+        # Pydantic模型会自动处理JSON到Python对象的转换
+        update_data = request.dict()["records"]
+        # 修复前端传递的 record_id 与SDK期望的 recordId 不匹配的问题
+        for record in update_data:
+            if 'record_id' in record:
+                record['recordId'] = record.pop('record_id')
         
-        # 调用astral_vika的正确API
-        result = await datasheet.records.aupdate(
-            records=[{
-                "record_id": request.record_id,
-                "fields": request.fields
-            }]
-        )
+        result = await datasheet.records.aupdate(records=update_data)
         
         # 清除相关缓存
-        clear_cache_pattern(f"record:{request.datasheet_id}:{request.record_id}")
-        clear_cache_pattern(f"records:{request.datasheet_id}")
-        
-        logger.info(f"更新记录成功: {request.datasheet_id}/{request.record_id}")
+        clear_cache_pattern(f"records:{datasheet_id}")
+        for record in request.records:
+            clear_cache_pattern(f"record:{datasheet_id}:{record.record_id}")
+
+        logger.info(f"更新记录成功: {datasheet_id}, 数量: {len(request.records)}")
         
         return {
             "success": True,
-            "data": result
+            "data": [r.to_dict() for r in result]
         }
         
     except Exception as e:
@@ -530,20 +539,17 @@ async def get_fields(
 ):
     """获取数据表的字段列表"""
     try:
-        cache_key = get_cache_key("fields", datasheet_id=datasheet_id)
-        cached_result = get_from_cache(cache_key, max_age=3600)
-        if cached_result is not None:
-            return {"success": True, "data": cached_result, "from_cache": True}
-        
         datasheet = vika.datasheet(datasheet_id)
-        result = await datasheet.fields.aall()
+        # astral_vika 库内部有5分钟缓存，这里不再需要额外缓存
+        fields = await datasheet.fields.aall()
         
-        set_cache(cache_key, result)
+        # 将Field对象转换为字典
+        result = [field.raw_data for field in fields]
         
         return {
             "success": True,
             "data": result,
-            "from_cache": False
+            "from_cache": False  # 明确表示数据不是来自此服务的缓存
         }
         
     except Exception as e:
@@ -638,12 +644,12 @@ async def batch_operations(
                 if op_type == 'create_record':
                     datasheet = vika.datasheet(op_data['datasheet_id'])
                     result = await datasheet.records.acreate(records=op_data['records'])
-                    results.append({'success': True, 'data': result})
+                    results.append({'success': True, 'data': [r.to_dict() for r in result]})
                     
                 elif op_type == 'update_record':
                     datasheet = vika.datasheet(op_data['datasheet_id'])
                     result = await datasheet.records.aupdate(records=op_data['records'])
-                    results.append({'success': True, 'data': result})
+                    results.append({'success': True, 'data': [r.to_dict() for r in result]})
                     
                 elif op_type == 'delete_record':
                     datasheet = vika.datasheet(op_data['datasheet_id'])

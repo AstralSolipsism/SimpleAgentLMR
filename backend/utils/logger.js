@@ -17,12 +17,14 @@ const LOG_LEVELS = {
   error: 0,
   warn: 1,
   info: 2,
-  debug: 3
+  debug: 3,
+  trace: 4
 };
 
 class Logger {
   constructor() {
-    this.level = LOG_LEVELS[config.logging.level] || LOG_LEVELS.debug;
+    const logLevel = process.env.LOG_LEVEL || 'info';
+    this.level = LOG_LEVELS[logLevel] || LOG_LEVELS.info;
   }
   
   /**
@@ -94,6 +96,13 @@ class Logger {
    */
   debug(message, meta = {}) {
     this.log('debug', message, meta);
+  }
+  
+  /**
+   * 追踪日志
+   */
+  trace(message, meta = {}) {
+    this.log('trace', message, meta);
   }
   
   /**

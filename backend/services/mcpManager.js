@@ -3,340 +3,341 @@
  * 负责管理和调用MCP工具
  */
 
-const { getDatabase } = require('../database/init');
+const fs = require('fs');
+const path = require('path');
 const logger = require('../utils/logger');
-const { vikaService } = require('./vikaService');
-const config = require('../config/config');
+const { db } = require('../database/init.js');
 
 /**
  * MCP工具管理器类
  */
 class MCPManager {
   constructor() {
-    this.tools = new Map(); // 本地工具缓存
-    this.initialized = false;
+    this.localTools = new Map(); // 本地工具缓存
+    this._initializePromise = null; // 用于存储初始化Promise，避免重复初始化
   }
-  
+
   /**
-   * 初始化MCP管理器
+   * 初始化MCP管理器，动态加载所有本地工具
+   * 确保只初始化一次
    */
-  async initialize() {
-    try {
-      await this.loadTools();
-      this.initialized = true;
-      logger.info('MCP管理器初始化成功');
-    } catch (error) {
-      logger.error('MCP管理器初始化失败', { error: error.message });
-      throw error;
-    }
-  }
-  
-  /**
-   * 加载工具
-   */
-  async loadTools() {
-    const db = getDatabase();
+      async initialize() {
+        if (this._initializePromise) {
+          return this._initializePromise;
+        }
     
+        this._initializePromise = (async () => {
+          try {
+            // 1. 从文件系统加载本地工具
+            await this.registerLocalTools();
+            const localToolNames = new Set(this.localTools.keys());
+            logger.info(`Found ${localToolNames.size} tools from local file system.`);
+    
+            // 2. 从数据库获取已注册的工具
+            const dbToolNames = await new Promise((resolve, reject) => {
+              db.all('SELECT tool_name FROM mcp_tools WHERE type = ?', ['local'], (err, rows) => {
+                if (err) {
+                  logger.error('Failed to query tools from database.', { error: err.message });
+                  return reject(err);
+                }
+                resolve(new Set(rows.map(row => row.tool_name)));
+              });
+            });
+            logger.info(`Found ${dbToolNames.size} tools in the database.`);
+    
+            // 3. 计算需要添加和删除的工具
+            const toolsToAdd = [...localToolNames].filter(name => !dbToolNames.has(name));
+            const toolsToRemove = [...dbToolNames].filter(name => !localToolNames.has(name));
+    
+            if (toolsToAdd.length === 0 && toolsToRemove.length === 0) {
+              logger.info('Tool database is already in sync with the file system.');
+            } else {
+                logger.info(`Tools to add: ${toolsToAdd.length} (${toolsToAdd.join(', ')})`);
+                logger.info(`Tools to remove: ${toolsToRemove.length} (${toolsToRemove.join(', ')})`);
+        
+                const dbPromises = [];
+        
+                // 4a. 为需要添加的工具创建插入Promise
+                toolsToAdd.forEach(toolName => {
+                  const tool = this.localTools.get(toolName);
+                  const sql = `
+                    INSERT INTO mcp_tools (tool_name, display_name, description, type, status, config)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                  `;
+                  const params = [
+                    tool.name,
+                    tool.displayName,
+                    tool.description || `一个名为 ${tool.name} 的工具`,
+                    'local',
+                    'active',
+                    JSON.stringify(tool.config || {}),
+                  ];
+                  dbPromises.push(new Promise((resolve, reject) => {
+                    db.run(sql, params, (err) => {
+                      if (err) {
+                        logger.error(`Failed to insert tool: ${toolName}`, { error: err.message });
+                        return reject(err);
+                      }
+                      logger.info(`Tool '${toolName}' inserted into database.`);
+                      resolve();
+                    });
+                  }));
+                });
+        
+                // 4b. 为需要删除的工具创建删除Promise
+                toolsToRemove.forEach(toolName => {
+                  const sql = 'DELETE FROM mcp_tools WHERE tool_name = ?';
+                  dbPromises.push(new Promise((resolve, reject) => {
+                    db.run(sql, [toolName], (err) => {
+                      if (err) {
+                        logger.error(`Failed to delete tool: ${toolName}`, { error: err.message });
+                        return reject(err);
+                      }
+                      logger.info(`Tool '${toolName}' removed from database.`);
+                      resolve();
+                    });
+                  }));
+                });
+        
+                // 5. 并行执行所有数据库操作
+                await Promise.all(dbPromises);
+                logger.info('Database synchronization for tools is complete.');
+            }
+            
+            // 6. 清理 agent_capabilities 表中的孤立记录 (新增步骤)
+            await this._cleanOrphanedAgentCapabilities();
+            
+            logger.info('MCP Manager initialized successfully.');
+          } catch (error) {
+            logger.error('MCP Manager initialization failed', { error: error.message });
+            this._initializePromise = null;
+            throw error;
+          }
+        })();
+        return this._initializePromise;
+      }
+
+  /**
+   * 注册单个工具，包括缓存和数据库同步
+   * @param {string} toolName - 工具名称
+   * @param {object} tool - 工具对象，包含 name, description, handler
+   */
+  registerTool(toolName, tool) {
+    this.localTools.set(toolName, tool);
+    logger.info(`[信息] 已加载工具到内存: ${toolName}`);
+  }
+
+  /**
+   * 从mcp_tools目录动态加载并注册所有本地工具
+   */
+  /**
+   * 从mcp_tools目录动态加载并注册所有本地工具。
+   * 新版本能够健壮地处理多种模块导出模式。
+   */
+  async registerLocalTools() {
+    const toolsDir = path.join(__dirname, 'mcp_tools');
+    logger.info(`开始从目录加载本地工具: ${toolsDir}`);
+
     try {
-      const tools = await new Promise((resolve, reject) => {
-        db.all('SELECT * FROM mcp_tools WHERE status = "active"', [], (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows);
-        });
-      });
-      
-      // 注册本地工具
-      for (const tool of tools) {
-        if (tool.tool_type === 'local') {
-          await this.registerLocalTool(tool);
+      const toolFiles = fs.readdirSync(toolsDir).filter(file => path.extname(file) === '.js');
+      logger.info(`在工具目录中找到 ${toolFiles.length} 个JS文件: [${toolFiles.join(', ')}]`);
+
+      for (const fileName of toolFiles) {
+        const toolPath = path.join(toolsDir, fileName);
+        try {
+          // 动态加载工具模块
+          const requiredModule = require(toolPath);
+
+          // 检查模块是否为有效对象
+          if (typeof requiredModule !== 'object' || requiredModule === null) {
+            logger.warn(`跳过无效的工具文件 (非对象导出): ${fileName}`);
+            continue;
+          }
+
+          // 统一处理单工具文件，兼容 { name, handler } 和 { name, func } 模式
+          if (typeof requiredModule.name === 'string') {
+            const handler = requiredModule.handler || requiredModule.func;
+
+            if (typeof handler === 'function') {
+              const fileContent = fs.readFileSync(toolPath, 'utf8');
+              
+              // 从JSDoc解析元数据
+              const nameMatch = fileContent.match(/@name\s+(.*)/);
+              const displayName = nameMatch ? nameMatch[1].trim() : handler.displayName || requiredModule.name;
+              
+              const descriptionMatch = fileContent.match(/@description\s+(.*)/);
+              let description = descriptionMatch ? descriptionMatch[1].trim() : null;
+              if (!description) {
+                description = handler.doc || `一个名为 ${requiredModule.name} 的工具。`;
+              }
+
+              const toolObject = {
+                name: requiredModule.name,
+                displayName: displayName,
+                description: description,
+                handler: handler,
+                config: requiredModule.config || {}
+              };
+
+              this.registerTool(toolObject.name, toolObject);
+
+            } else {
+              logger.warn(`跳过工具 '${requiredModule.name}' (无效的handler/func): ${fileName}`);
+            }
+          }
+          // 兼容 { tool1, tool2 } 模式
+          else {
+            let registeredInFile = 0;
+            for (const toolName in requiredModule) {
+              const toolFunction = requiredModule[toolName];
+              if (typeof toolFunction === 'function') {
+                
+                const toolObject = {
+                  name: toolName,
+                  displayName: toolFunction.displayName || toolName, // 优先使用函数上的displayName属性
+                  description: toolFunction.doc || `一个名为 ${toolName} 的工具。`,
+                  handler: toolFunction,
+                  config: toolFunction.config || {}
+                };
+                this.registerTool(toolName, toolObject);
+                registeredInFile++;
+              }
+            }
+            if (registeredInFile === 0) {
+                logger.warn(`在 ${fileName} 中未找到可注册的工具函数。`);
+            }
+          }
+
+        } catch (error) {
+          logger.error(`从文件 ${fileName} 加载工具失败`, {
+            error: error.message,
+            stack: error.stack
+          });
         }
       }
-      
-      logger.info('MCP工具加载完成', { count: tools.length });
-      
-    } finally {
-      db.close();
-    }
-  }
-  
-  /**
-   * 注册本地工具
-   */
-  async registerLocalTool(toolConfig) {
-    try {
-      const config = toolConfig.config ? JSON.parse(toolConfig.config) : {};
-      
-      switch (toolConfig.tool_name) {
-        case 'astral_vika':
-          this.tools.set('astral_vika', {
-            name: 'astral_vika',
-            description: '维格表操作工具',
-            handler: this.vikaToolHandler.bind(this),
-            config
-          });
-          break;
-          
-        case 'web_search':
-          this.tools.set('web_search', {
-            name: 'web_search',
-            description: '网页搜索工具',
-            handler: this.webSearchHandler.bind(this),
-            config
-          });
-          break;
-          
-        case 'file_operations':
-          this.tools.set('file_operations', {
-            name: 'file_operations',
-            description: '文件操作工具',
-            handler: this.fileOperationsHandler.bind(this),
-            config
-          });
-          break;
-          
-        default:
-          logger.warn('未知的本地工具类型', { tool: toolConfig.tool_name });
-      }
-      
     } catch (error) {
-      logger.error('注册本地工具失败', { 
-        tool: toolConfig.tool_name, 
-        error: error.message 
+      logger.error(`读取工具目录失败: ${toolsDir}`, {
+        error: error.message,
+        stack: error.stack
       });
+      throw error; // 向上抛出异常，以便初始化过程可以捕获它
     }
+    logger.info('所有本地工具加载完成。');
   }
-  
+
   /**
    * 调用工具
    */
   async callTool(toolName, params = {}) {
-    if (!this.initialized) {
-      await this.initialize();
+    // 确保管理器已初始化
+    if (!this._initializePromise) {
+      throw new Error('MCP Manager has not been initialized. Call initialize() first.');
     }
-    
-    const tool = this.tools.get(toolName);
+    await this._initializePromise; // 等待初始化完成
+
+    const tool = this.localTools.get(toolName);
     if (!tool) {
-      throw new Error(`工具 ${toolName} 不存在或未注册`);
+      throw new Error(`Tool ${toolName} does not exist or is not registered.`);
     }
-    
+
     try {
-      logger.debug('调用MCP工具', { tool: toolName, params });
-      
-      const result = await tool.handler(params, tool.config);
-      
-      logger.debug('MCP工具调用成功', { 
-        tool: toolName, 
-        resultType: typeof result 
+      logger.info('尝试调用工具', { toolName: toolName, params });
+      const result = await tool.handler(params);
+      logger.info('工具执行成功', {
+        toolName: toolName,
+        resultType: typeof result,
       });
-      
       return result;
-      
     } catch (error) {
-      logger.error('MCP工具调用失败', { 
-        tool: toolName, 
-        params, 
-        error: error.message 
+      logger.error('工具执行失败', {
+        toolName: toolName,
+        params,
+        error: error.message,
       });
       throw error;
     }
   }
-  
-  /**
-   * 维格表工具处理器
-   */
-  async vikaToolHandler(params, toolConfig) {
-    const { action, datasheet_id, record_id, data, options = {} } = params;
-    
-    switch (action) {
-      case 'create_record':
-        if (!datasheet_id || !data) {
-          throw new Error('创建记录需要datasheet_id和data参数');
-        }
-        return await vikaService.createRecord(datasheet_id, data, options.fieldMapping);
-        
-      case 'update_record':
-        if (!datasheet_id || !record_id || !data) {
-          throw new Error('更新记录需要datasheet_id、record_id和data参数');
-        }
-        return await vikaService.updateRecord(datasheet_id, record_id, data, options.fieldMapping);
-        
-      case 'get_records':
-        if (!datasheet_id) {
-          throw new Error('获取记录需要datasheet_id参数');
-        }
-        return await vikaService.getRecords(datasheet_id, options);
-        
-      case 'get_fields':
-        if (!datasheet_id) {
-          throw new Error('获取字段需要datasheet_id参数');
-        }
-        return await vikaService.getDatasheetFields(datasheet_id);
-        
-      case 'get_datasheets':
-        const spaceId = options.space_id || toolConfig.spaceId;
-        return await vikaService.getDatasheets(spaceId);
-        
-      default:
-        throw new Error(`不支持的维格表操作: ${action}`);
-    }
-  }
-  
-  /**
-   * 网页搜索工具处理器
-   */
-  async webSearchHandler(params, toolConfig) {
-    const { query, num_results = 10, search_type = 'web' } = params;
-    
-    if (!query) {
-      throw new Error('搜索查询不能为空');
-    }
-    
-    // 这里可以集成实际的搜索API
-    // 由于是内网环境，可能需要使用内部搜索服务
-    logger.info('执行网页搜索', { query, num_results, search_type });
-    
-    // 模拟搜索结果
-    return {
-      query,
-      results: [
-        {
-          title: '搜索结果示例',
-          url: 'http://example.com',
-          snippet: '这是一个搜索结果的摘要',
-          source: 'internal_search'
-        }
-      ],
-      total: 1,
-      search_time: new Date().toISOString()
-    };
-  }
-  
-  /**
-   * 文件操作工具处理器
-   */
-  async fileOperationsHandler(params, toolConfig) {
-    const { action, file_path, content, options = {} } = params;
-    const fs = require('fs').promises;
-    const path = require('path');
-    
-    // 安全检查：限制文件操作在特定目录内
-    const allowedDir = path.join(__dirname, '../temp');
-    const fullPath = path.resolve(allowedDir, file_path || '');
-    
-    if (!fullPath.startsWith(allowedDir)) {
-      throw new Error('文件路径不在允许的目录范围内');
-    }
-    
-    switch (action) {
-      case 'read':
-        try {
-          const content = await fs.readFile(fullPath, 'utf-8');
-          return { content, path: file_path };
-        } catch (error) {
-          throw new Error(`读取文件失败: ${error.message}`);
-        }
-        
-      case 'write':
-        if (!content) {
-          throw new Error('写入文件需要content参数');
-        }
-        try {
-          // 确保目录存在
-          await fs.mkdir(path.dirname(fullPath), { recursive: true });
-          await fs.writeFile(fullPath, content, 'utf-8');
-          return { success: true, path: file_path };
-        } catch (error) {
-          throw new Error(`写入文件失败: ${error.message}`);
-        }
-        
-      case 'list':
-        try {
-          const files = await fs.readdir(fullPath);
-          return { files, path: file_path };
-        } catch (error) {
-          throw new Error(`列出文件失败: ${error.message}`);
-        }
-        
-      case 'delete':
-        try {
-          await fs.unlink(fullPath);
-          return { success: true, path: file_path };
-        } catch (error) {
-          throw new Error(`删除文件失败: ${error.message}`);
-        }
-        
-      default:
-        throw new Error(`不支持的文件操作: ${action}`);
-    }
-  }
-  
+
   /**
    * 获取工具列表
    */
   getAvailableTools() {
     const tools = [];
-    
-    for (const [name, tool] of this.tools.entries()) {
+    for (const [name, tool] of this.localTools.entries()) {
       tools.push({
         name: tool.name,
         description: tool.description,
-        type: 'local'
+        type: 'local',
       });
     }
-    
     return tools;
   }
-  
+
   /**
    * 获取工具详情
    */
   getToolDetails(toolName) {
-    const tool = this.tools.get(toolName);
+    const tool = this.localTools.get(toolName);
     if (!tool) {
       return null;
     }
-    
     return {
       name: tool.name,
       description: tool.description,
-      config: tool.config,
-      type: 'local'
+      config: tool.config, // 假设工具模块可以导出配置
+      type: 'local',
     };
   }
-  
+
   /**
    * 重新加载工具
    */
   async reloadTools() {
-    this.tools.clear();
-    await this.loadTools();
-    logger.info('MCP工具重新加载完成');
+    this.localTools.clear();
+    this._initializePromise = null; // 重置初始化状态
+    await this.initialize(); // 重新初始化
+    logger.info('MCP tools reloaded successfully.');
   }
-  
+
   /**
-   * 验证工具参数
+   * 清理 agent_capabilities 表中的孤立记录
+   * 这些记录指向的 mcp_tools 工具已被删除
+   * @private
    */
-  validateToolParams(toolName, params) {
-    const tool = this.tools.get(toolName);
-    if (!tool) {
-      throw new Error(`工具 ${toolName} 不存在`);
-    }
-    
-    // 这里可以添加具体的参数验证逻辑
-    // 基于工具类型和配置进行验证
-    
-    return true;
+  async _cleanOrphanedAgentCapabilities() {
+    logger.info('Starting cleanup of orphaned agent capabilities...');
+    const sql = `
+      DELETE FROM agent_capabilities
+      WHERE
+        capability_type = 'mcp_tool' AND
+        target_id NOT IN (SELECT tool_name FROM mcp_tools);
+    `;
+
+    return new Promise((resolve, reject) => {
+      db.run(sql, function(err) {
+        if (err) {
+          logger.error('Failed to clean up orphaned agent capabilities', { error: err.message });
+          return reject(err);
+        }
+        if (this.changes > 0) {
+          logger.info(`Successfully cleaned up ${this.changes} orphaned agent capabilities.`);
+        } else {
+          logger.info('No orphaned agent capabilities found to clean up.');
+        }
+        resolve({ cleanedCount: this.changes });
+      });
+    });
   }
-  
+
   /**
    * 获取工具统计信息
    */
   getStats() {
     return {
       initialized: this.initialized,
-      totalTools: this.tools.size,
-      toolNames: Array.from(this.tools.keys()),
-      lastReloadTime: this.lastReloadTime || null
+      totalTools: this.localTools.size,
+      toolNames: Array.from(this.localTools.keys()),
+      lastReloadTime: this.lastReloadTime || null, // lastReloadTime需要被设置
     };
   }
 }

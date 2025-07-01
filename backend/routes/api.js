@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const taskExecutor = require('../services/taskExecutor');
 const logger = require('../utils/logger');
-const db = require('../database/init.js'); // 引入数据库实例
+const { db } = require('../database/init.js'); // 引入数据库实例
 const { v4: uuidv4 } = require('uuid'); // 用于生成任务ID
 
 // 引入各个路由模块
@@ -29,8 +29,9 @@ router.use('/config', configRouter);
 
 // 外部访问接口 - 任务状态查询
 router.get('/external/task/:taskId', async (req, res) => {
+  const { taskId } = req.params;
+  logger.info(`GET /external/task/${taskId} - 收到请求`, { params: req.params });
   try {
-    const { taskId } = req.params;
     const task = await db.get('SELECT * FROM tasks WHERE id = ?', [taskId]);
 
     if (!task) {
@@ -49,6 +50,7 @@ router.get('/external/task/:taskId', async (req, res) => {
         }
     }
 
+    logger.info(`GET /external/task/${taskId} - 操作成功`);
     res.json({
       success: true,
       data: {
@@ -67,13 +69,14 @@ router.get('/external/task/:taskId', async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('任务状态查询失败:', error);
+    logger.error(`任务状态查询失败，taskId: ${taskId}`, { error: error.message, stack: error.stack });
     res.status(500).json({ success: false, message: '任务状态查询失败', error: error.message });
   }
 });
 
 // 外部访问接口 - 输入源列表（用于其他系统了解可用的接入点）
 router.get('/external/input-sources', async (req, res) => {
+  logger.info('GET /external/input-sources - 收到请求');
   try {
     const sources = await db.all('SELECT id, source_name FROM input_sources');
     const baseUrl = `http://${req.get('host')}`;
@@ -112,13 +115,14 @@ router.get('/external/input-sources', async (req, res) => {
       }
     }));
 
+    logger.info('GET /external/input-sources - 操作成功');
     res.json({
       success: true,
       data: formattedSources
     });
 
   } catch (error) {
-    logger.error('获取输入源列表失败:', error);
+    logger.error('获取输入源列表失败', { error: error.message, stack: error.stack });
     res.status(500).json({
       success: false,
       message: '获取输入源列表失败',
@@ -129,6 +133,7 @@ router.get('/external/input-sources', async (req, res) => {
 
 // 健康检查
 router.get('/health', (req, res) => {
+  logger.info('GET /health - 健康检查');
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -139,6 +144,7 @@ router.get('/health', (req, res) => {
 
 // API文档信息
 router.get('/info', (req, res) => {
+  logger.info('GET /info - 获取API信息');
   res.json({
     name: 'SimpleA2A System',
     description: 'A2A智能体调度系统',

@@ -74,6 +74,13 @@ class AgentResponseParser {
               action = { type: 'task_transfer', ...parsed };
               result.taskTransfers.push(action);
               break;
+<<<<<<< HEAD
+=======
+            case 'vika-operation':
+              action = { type: 'vika_operation', ...parsed };
+              result.vikaOperations.push(action);
+              break;
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
             case 'skill-call':
               action = { type: 'skill_call', ...parsed };
               result.skillCalls.push(action);

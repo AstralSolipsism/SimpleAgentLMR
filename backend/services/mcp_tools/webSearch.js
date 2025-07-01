@@ -1,7 +1,10 @@
+<<<<<<< HEAD
 /**
  * @name 网页搜索
  * @description 使用Serper API执行网页搜索。
  */
+=======
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
 const axios = require('axios');
 const { globalConfig } = require('../../config/globalConfig');
 const logger = require('../../utils/logger');

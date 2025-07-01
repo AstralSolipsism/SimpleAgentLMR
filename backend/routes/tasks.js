@@ -84,6 +84,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     });
   }
 
+<<<<<<< HEAD
   // 3. 获取主任务ID，并一次性查询所有相关的子任务
   const mainTaskIds = mainTasks.map(t => t.id);
   const subtasksSql = `
@@ -124,6 +125,8 @@ router.get('/', asyncErrorHandler(async (req, res) => {
     };
   });
 
+=======
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
   logger.info(`GET /api/v1/tasks - Operation successful`);
   res.json({
     success: true,
@@ -144,7 +147,11 @@ router.get('/', asyncErrorHandler(async (req, res) => {
  */
 router.get('/:taskId', asyncErrorHandler(async (req, res) => {
   const { taskId } = req.params;
+<<<<<<< HEAD
   logger.trace(`GET /api/v1/tasks/${taskId} - Request received`, { params: req.params });
+=======
+  logger.info(`GET /api/v1/tasks/${taskId} - Request received`, { params: req.params });
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
 
   const task = await dbGet('SELECT * FROM tasks WHERE id = ?', [taskId]);
   if (!task) {
@@ -181,7 +188,11 @@ router.get('/:taskId', asyncErrorHandler(async (req, res) => {
       action_results: step.action_results ? JSON.parse(step.action_results) : null,
   }));
 
+<<<<<<< HEAD
   logger.trace(`GET /api/v1/tasks/${taskId} - Operation successful`);
+=======
+  logger.info(`GET /api/v1/tasks/${taskId} - Operation successful`);
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
   res.json({
     success: true,
     data: {

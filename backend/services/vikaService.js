@@ -42,12 +42,16 @@ class VikaService {
       // 添加请求拦截器用于日志
       this.apiClient.interceptors.request.use(
         (config) => {
+<<<<<<< HEAD
           const requestInfo = {
             method: config.method?.toUpperCase(),
             url: config.url,
             data: config.data,
           };
           logger.debug(`[VIKA_REQUEST_DEBUG] Request PARAMS: ${JSON.stringify(requestInfo)}`);
+=======
+          logger.debug('发送到维格表的请求', { method: config.method?.toUpperCase(), url: config.url, data: config.data });
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
           return config;
         },
         (error) => {
@@ -59,7 +63,11 @@ class VikaService {
       // 添加响应拦截器
       this.apiClient.interceptors.response.use(
         (response) => {
+<<<<<<< HEAD
           logger.debug(`[VIKA_RESPONSE_DEBUG] Response DATA: ${JSON.stringify(response.data)}`);
+=======
+          logger.debug('收到维格表的响应', { status: response.status, data: response.data });
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
           return response;
         },
         (error) => {
@@ -244,11 +252,18 @@ class VikaService {
       await this.ensureInitialized();
       
       logger.debug('发送到维格表的请求', { datasheet_id: datasheetId, record_id: recordId, fields: fields });
+<<<<<<< HEAD
       const response = await this.apiClient.patch(`/records/${datasheetId}`, {
         records: [{
           record_id: recordId,
           fields: fields
         }]
+=======
+      const response = await this.apiClient.put('/records', {
+        datasheet_id: datasheetId,
+        record_id: recordId,
+        fields: fields
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
       });
       
       const result = this.handleApiResponse(response, `更新记录: ${datasheetId}/${recordId}`);
@@ -300,8 +315,13 @@ class VikaService {
   }
   
   // 获取记录列表
+<<<<<<< HEAD
   async getRecords(datasheetId, params = {}) {
     logger.info('正在从维格表获取记录列表', { datasheetId, params });
+=======
+  async getRecords(datasheetId, options = {}) {
+    logger.info('正在从维格表获取记录列表', { datasheetId });
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
     try {
       await this.sleep(this.apiDelay);
       await this.ensureInitialized();

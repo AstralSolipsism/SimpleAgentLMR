@@ -29,8 +29,13 @@ interface Agent {
   app_id: string;
   app_name: string;
   responsibilities_and_functions: string;
+<<<<<<< HEAD
   capabilities?: { capability_type: string; target_name: string; displayName?: string }[];
   allowed_tools?: { name: string; displayName: string }[];
+=======
+  capabilities?: { capability_type: string; target_name: string }[];
+  allowed_tool_names?: string[];
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
   subordinate_agent_ids?: string[];
   status: 'active' | 'inactive' | 'error';
   createdAt: string;
@@ -89,21 +94,33 @@ export function Agents() {
       if (agentsApiResponse.success && agentsApiResponse.data) {
         const agentItems = agentsApiResponse.data.items || [];
         const processedData = agentItems.map((agent: any) => {
+<<<<<<< HEAD
           const allowed_tools: { name: string; displayName: string }[] = [];
+=======
+          const allowed_tool_names: string[] = [];
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
           const subordinate_agent_ids: string[] = [];
           if (Array.isArray(agent.capabilities)) {
             for (const cap of agent.capabilities) {
               if (cap.capability_type === 'mcp_tool') {
+<<<<<<< HEAD
                 allowed_tools.push({
                   name: cap.target_name,
                   displayName: cap.displayName || cap.target_name
                 });
+=======
+                allowed_tool_names.push(cap.target_name);
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
               } else if (cap.capability_type === 'sub_agent') {
                 subordinate_agent_ids.push(cap.target_name);
               }
             }
           }
+<<<<<<< HEAD
           return { ...agent, allowed_tools, subordinate_agent_ids };
+=======
+          return { ...agent, allowed_tool_names, subordinate_agent_ids };
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
         });
         setAgents(processedData);
         // Populate the list for the subordinate agent selector
@@ -348,6 +365,7 @@ export function Agents() {
                   placeholder="选择允许调用的工具..."
                 />
               </div>
+<<<<<<< HEAD
             </div>
             
             <DialogFooter>
@@ -361,6 +379,45 @@ export function Agents() {
           </form>
         </DialogContent>
       </Dialog>
+=======
+
+              {/* Updated Tools Selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700">允许调用的工具</label>
+                <div className="mt-2">
+                  <MultiSelectCombobox
+                    options={mcpTools.map(tool => ({ id: tool.tool_name, name: tool.tool_name }))}
+                    selectedValues={formData.allowed_tool_names}
+                    onChange={(selected) => setFormData({ ...formData, allowed_tool_names: selected })}
+                    placeholder="选择允许调用的工具..."
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForm(false);
+                    setEditingAgent(null);
+                    resetForm();
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                >
+                  {editingAgent ? '更新' : '创建'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
 
       {/* Agents grid - Updated display */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">

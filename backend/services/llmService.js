@@ -4,10 +4,13 @@ const logger = require('../utils/logger');
 
 const csgClientInstance = require('./csgClient');
 
+<<<<<<< HEAD
 const requestTimestamps = [];
 const RATE_LIMIT_PER_SECOND = 2;
 const ONE_SECOND_IN_MS = 1000;
 
+=======
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
 /**
  * 统一调用LLM服务的抽象层。
  * @param {Array<object>} messages - 发送给LLM的消息数组，格式如 [{ role: 'user', content: '...' }]。
@@ -18,6 +21,7 @@ const ONE_SECOND_IN_MS = 1000;
  * @returns {Promise<object>} - 返回一个包含调用结果的对象，格式为 { success: boolean, content: string, error?: string }。
  */
 async function invokeLLM(messages, agentConfig) {
+<<<<<<< HEAD
   // --- 速率限制逻辑开始 ---
   const now = Date.now();
 
@@ -39,6 +43,8 @@ async function invokeLLM(messages, agentConfig) {
   requestTimestamps.push(Date.now());
   // --- 速率限制逻辑结束 ---
 
+=======
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
   try {
     if (!agentConfig || !agentConfig.llm_env) {
       throw new Error('llm_env is required in agentConfig.');

@@ -97,6 +97,7 @@ class TaskExecutor {
           ['completed', JSON.stringify(result.result), new Date().toISOString(), taskId]
         );
         logger.info('任务成功完成 (completion)', { taskId, result: result.result });
+<<<<<<< HEAD
         // 当任务完成时，检查是否需要唤醒父任务
         if (taskRecord.parent_task_id) {
           this.wakeupParentTask(taskRecord.parent_task_id);
@@ -106,6 +107,13 @@ class TaskExecutor {
         const { targetAgent, task, context } = result.details;
         // 创建子任务记录 - 【修复】确保 context 参数被正确传递
         const subTask = await createSubTask(targetAgent, task, context, taskId);
+=======
+      } else if (result && result.type === 'task_transfer') {
+        // 如果仍在使用，则处理旧的 'task_transfer' 机制
+        const { targetAgent, task, context } = result.details;
+        // 创建子任务记录
+        const subTask = await createSubTask(targetAgent, task, taskId);
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
         // 异步执行新任务
         setImmediate(() => {
             this.executeTask(subTask).catch(err => {
@@ -139,6 +147,7 @@ class TaskExecutor {
    */
   async executeAgentChain(task) {
     const taskId = task.id;
+<<<<<<< HEAD
 
     const agentConfig = await this.getAgentConfig(task.agent_id);
     const inputData = JSON.parse(task.input_data || '{}');
@@ -149,8 +158,26 @@ class TaskExecutor {
     if (task.parent_task_id && options.context && Object.keys(options.context).length > 0) {
       userInput += `\n\n父任务提供的上下文 (Context): ${JSON.stringify(options.context, null, 2)}`;
       logger.info('已为子任务附加了父任务的上下文', { taskId: task.id });
-    }
+=======
+    const agentConfig = await this.getAgentConfig(task.agent_id);
+    const inputData = JSON.parse(task.input_data || '{}');
+    const userInput = inputData.input;
+    const options = { context: inputData.context || {} };
 
+    const maxSteps = 10;
+    let currentStep = 0;
+    const history = [];
+    let finalAnswer = null;
+
+    const systemPrompt = await this.responseParser.generateSystemPrompt(agentConfig.agent_id);
+    history.push({ role: 'system', content: systemPrompt });
+    if (agentConfig.environment_type) {
+      agentConfig.llm_env = agentConfig.environment_type;
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
+    }
+    history.push({ role: 'user', content: userInput });
+
+<<<<<<< HEAD
     const maxSteps = 10;
     const history = [];
     let finalAnswer = null;
@@ -239,12 +266,27 @@ class TaskExecutor {
       logger.trace('向大模型发送的完整消息:', JSON.stringify(history, null, 2));
       const response = await llmService.invokeLLM(history, agentConfig);
       logger.trace('从大模型收到的原始响应:', JSON.stringify(response, null, 2));
+=======
+    await dbRun(
+      'INSERT INTO task_steps (task_id, step_id, agent_id, agent_name, input, context, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [taskId, `step_${currentStep}`, agentConfig.id, agentConfig.name, userInput, JSON.stringify(options.context || {}), 'running', new Date().toISOString()]
+    );
+
+    while (currentStep < maxSteps) {
+      currentStep++;
+      logger.info(`开始执行第 ${currentStep} 步`, { taskId, current_agent_id: agentConfig.agent_id });
+      const stepId = `step_${currentStep}`;
+      const stepStartTime = new Date().toISOString();
+
+      const response = await llmService.invokeLLM(history, agentConfig);
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
       if (!response || !response.content) {
         throw new Error('LLM did not return a valid response.');
       }
 
       const parsedResponse = this.responseParser.parseAgentResponse(response.content.content, agentConfig.agent_id, { react_mode: true });
       const thought = parsedResponse.thought;
+<<<<<<< HEAD
       let action = parsedResponse.actions.length > 0 ? parsedResponse.actions[0] : null;
 
       // 修复：增加一个更通用的“救援”机制。如果主解析器未能提取出 Action，但响应文本中明显包含了任何可执行的 Action（如 skill-call），
@@ -280,6 +322,9 @@ class TaskExecutor {
           }
         }
       }
+=======
+      const action = parsedResponse.actions.length > 0 ? parsedResponse.actions[0] : null;
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
 
       history.push({ role: 'assistant', content: response.content.content });
       
@@ -289,6 +334,7 @@ class TaskExecutor {
       );
 
       if (!action || action.type === 'result') {
+<<<<<<< HEAD
         // 确保 agentResponse 是从模型返回的原始字符串内容
         const agentResponse = action ? action.data : parsedResponse.content;
 
@@ -349,6 +395,49 @@ class TaskExecutor {
         
         
         break; // 终止循环
+=======
+        finalAnswer = action ? action.data : parsedResponse.content;
+        
+        try {
+          let parsedFinalAnswer = null;
+          const a2aTaskMatch = finalAnswer.match(/```json:a2a-task\n([\s\S]*?)\n```/);
+
+          if (a2aTaskMatch && a2aTaskMatch[1]) {
+            parsedFinalAnswer = JSON.parse(a2aTaskMatch[1]);
+          } else {
+            // 尝试直接解析，以防它不在 markdown 块中
+            parsedFinalAnswer = JSON.parse(finalAnswer);
+          }
+
+          if (a2aTaskMatch && parsedFinalAnswer) {
+            logger.info('检测到A2A任务派发请求 (异步委托)', { taskId, parsedFinalAnswer });
+            const a2aTask = parsedFinalAnswer;
+            const subTask = await createSubTask(a2aTask.targetAgent, a2aTask.task, a2aTask.context, taskId);
+            
+            // 异步执行新任务
+            setImmediate(() => {
+                // 我们需要执行器实例来调用 executeTask
+                module.exports.executeTask(subTask).catch(err => {
+                    logger.error(`后台执行委托任务失败: ${subTask.id}`, { error: err.message, stack: err.stack });
+                });
+            });
+
+            await dbRun(
+              'UPDATE tasks SET status = ?, result = ?, finished_at = ? WHERE id = ?',
+              ['delegated', JSON.stringify({ message: '任务已成功委托给下一个智能体。', a2a_task: a2aTask }), new Date().toISOString(), taskId]
+            );
+            return { type: 'delegation', details: a2aTask };
+          }
+        } catch (e) {
+          logger.debug('finalAnswer 不是有效的a2a-task JSON，按常规结果处理。', { taskId, finalAnswer, error: e.message });
+        }
+
+        await dbRun(
+          'UPDATE task_steps SET status = ?, finished_at = ?, action_results = ? WHERE task_id = ? AND step_id = ?',
+          ['completed', new Date().toISOString(), JSON.stringify([{ action, result: { success: true, data: finalAnswer } }]), taskId, stepId]
+        );
+        break;
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
       }
 
       let observation = '';
@@ -362,14 +451,23 @@ class TaskExecutor {
             actionResult = { success: true, result: observation };
         } else {
             switch (action.type) {
+<<<<<<< HEAD
+=======
+              case 'vika_operation':
+                actionResult = await this.executeVikaOperation(action);
+                break;
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
               case 'skill_call':
                 actionResult = await this.executeSkillCall(action);
                 break;
               case 'task_transfer':
+<<<<<<< HEAD
                 await dbRun(
                   'UPDATE task_steps SET status = ?, finished_at = ?, action_results = ? WHERE task_id = ? AND step_id = ?',
                   ['completed', new Date().toISOString(), JSON.stringify([{ action, result: { success: true, message: 'Task transferred' } }]), taskId, stepId]
                 );
+=======
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
                 return { type: 'task_transfer', details: action };
               default:
                 actionResult = { success: false, message: `Unknown action type: ${action.type}` };
@@ -388,6 +486,35 @@ class TaskExecutor {
       );
 
       history.push({ role: 'user', content: observation });
+<<<<<<< HEAD
+=======
+    }
+
+    if (currentStep >= maxSteps) {
+      logger.warn('任务因达到最大步骤限制而中断', { taskId, maxSteps });
+      finalAnswer = finalAnswer || { error: 'Max steps reached' };
+    }
+
+    return { type: 'completion', result: finalAnswer };
+  }
+
+
+  /**
+   * 更新任务状态和输出
+   * @param {string} taskId - 任务ID
+   * @param {object} data - 要更新的数据 { status, output }
+   */
+  async updateTask(taskId, data) {
+    try {
+      const { status, output } = data; // output 变量仍然保留，但不再用于数据库更新
+      await dbRun(
+        'UPDATE tasks SET status = ?, result = ?, finished_at = ? WHERE id = ?',
+        [status, JSON.stringify({ output: output || data.result }), new Date().toISOString(), taskId] // 确保使用 result 列
+      );
+      logger.info('任务状态更新成功', { taskId, status });
+    } catch (error) {
+      logger.error('更新任务状态失败', { taskId, error: error.message });
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
     }
 
     if (currentStep >= maxSteps) {
@@ -633,8 +760,13 @@ class TaskExecutor {
  */
 async function executeSubAgentAndWait(targetAgentId, taskInput, parentTaskId) {
   try {
+<<<<<<< HEAD
     // 1. 在数据库中创建子任务记录。 - 【修复】确保空的 context 对象和 parentTaskId 被正确传递
     const subTask = await createSubTask(targetAgentId, taskInput, {}, parentTaskId);
+=======
+    // 1. 在数据库中创建子任务记录。
+    const subTask = await createSubTask(targetAgentId, taskInput, parentTaskId);
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
     
     // 2. 获取执行器实例并为子任务执行智能体链。
     // 当此代码被调用时，`module.exports` 将是 `TaskExecutor` 的实例。

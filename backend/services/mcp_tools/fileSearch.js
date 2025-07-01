@@ -1,7 +1,10 @@
+<<<<<<< HEAD
 /**
  * @name 文件内容搜索
  * @description 在指定目录中搜索文件内容。
  */
+=======
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
 module.exports = {
   name: 'file_search',
   description: '在指定目录中搜索文件。',

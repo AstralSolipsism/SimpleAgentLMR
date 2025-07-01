@@ -139,11 +139,15 @@ export function Tasks() {
 
   const fetchTaskDetails = async (taskId: string) => {
     setLoadingDetails(true);
+<<<<<<< HEAD
     setSubtaskDetails({}); // 重置
+=======
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
     try {
       const response = await fetch(`/api/v1/tasks/${taskId}`);
       const apiResponse = await response.json();
       if (apiResponse.success && apiResponse.data) {
+<<<<<<< HEAD
         const mainTask = apiResponse.data;
         setSelectedTask(mainTask);
         setTaskSteps(mainTask.steps || []);
@@ -164,6 +168,10 @@ export function Tasks() {
             }
           });
         }
+=======
+        setSelectedTask(apiResponse.data);
+        setTaskSteps(apiResponse.data.steps || []);
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
       }
     } catch (error) {
       console.error('Failed to fetch task details:', error);
@@ -389,6 +397,7 @@ export function Tasks() {
               ) : tasks.length === 0 ? (
                 <div className="text-center py-4 text-gray-500">暂无任务</div>
               ) : (
+<<<<<<< HEAD
 <Accordion type="multiple" className="w-full space-y-2">
   {tasks.map((task) => {
     const isSelectedInManagement = selectedTaskIds.includes(task.id);
@@ -475,6 +484,37 @@ export function Tasks() {
     );
   })}
 </Accordion>
+=======
+                tasks.map((task) => {
+                  const isSelected = selectedTask?.id === task.id;
+                  const containerClass = `p-4 border rounded-lg cursor-pointer hover:bg-gray-50 ${isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`;
+                  
+                  return (
+                    <div
+                      key={task.id}
+                      className={containerClass}
+                      onClick={() => {
+                        fetchTaskDetails(task.id);
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-sm font-medium text-gray-900">{task.source_name || task.source_id}</span>
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(task.status)}`}>
+                              {getStatusText(task.status)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1 truncate">ID: {task.id}</p>
+                        </div>
+                        <div className="text-right text-xs text-gray-500">
+                          {new Date(task.created_at).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
               )}
             </div>
           </div>
@@ -577,16 +617,26 @@ export function Tasks() {
                               <CollapsibleContent className="mt-2 space-y-2">
                                 <div className="bg-gray-100 p-2 rounded">
                                   <h5 className="font-semibold text-gray-700">原始Prompt</h5>
+<<<<<<< HEAD
                                   <pre className={`mt-1 text-xs text-gray-600 font-mono ${preserveWhitespace ? 'whitespace-pre-wrap' : 'whitespace-normal'}`}>
+=======
+                                  <pre className="mt-1 text-xs text-gray-600 font-mono whitespace-pre-wrap">
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
                                     <code>{step.input}</code>
                                   </pre>
                                 </div>
                                 {step.response && (
                                   <div className="bg-gray-100 p-2 rounded">
                                     <h5 className="font-semibold text-gray-700">原始Completion</h5>
+<<<<<<< HEAD
                                     <div className="mt-1">
                                       <RenderResponse data={step.response} preserveWhitespace={preserveWhitespace} />
                                     </div>
+=======
+                                    <pre className="mt-1 text-xs text-gray-600 font-mono whitespace-pre-wrap">
+                                      <code>{JSON.stringify(step.response, null, 2)}</code>
+                                    </pre>
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
                                   </div>
                                 )}
                                 {step.error && (
@@ -607,6 +657,7 @@ export function Tasks() {
                     <div>
                       <h4 className="text-sm font-medium text-gray-900 mb-2">子任务</h4>
                       <div className="space-y-3">
+<<<<<<< HEAD
                         {selectedTask.subtasks.map(subtask => {
                           const details = subtaskDetails[subtask.id];
                           return (
@@ -618,11 +669,24 @@ export function Tasks() {
                                 </div>
                                 <div className="flex items-center space-x-2">
                                   <span className={`font-semibold ${getStatusColor(subtask.status)} px-2 py-0.5 rounded-full text-xs`}>
+=======
+                        {selectedTask.subtasks.map(subtask => (
+                          <Collapsible key={subtask.id}>
+                            <div className="p-3 border rounded-lg bg-blue-50">
+                              <CollapsibleTrigger className="flex justify-between items-center w-full text-left">
+                                <div className="flex-1">
+                                  <span className="font-bold text-blue-800">子任务: {subtask.id.substring(0, 8)}...</span>
+                                  <p className="text-xs text-blue-600 mt-1">输入: {subtask.input_data.input}</p>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <span className={`font-semibold ${getStatusColor(subtask.status)} px-2 py-0.5 rounded-full`}>
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
                                     {getStatusText(subtask.status)}
                                   </span>
                                   <ChevronDown className="h-4 w-4 transition-transform duration-200 data-[state=open]:rotate-180" />
                                 </div>
                               </CollapsibleTrigger>
+<<<<<<< HEAD
                               <CollapsibleContent className="mt-3 pt-3 border-t border-gray-200 space-y-2">
                                 {!details ? (
                                   <p className="text-xs text-gray-500">正在加载步骤...</p>
@@ -661,14 +725,30 @@ export function Tasks() {
                                         )}
                                       </CollapsibleContent>
                                     </Collapsible>
+=======
+                              <CollapsibleContent className="mt-3 pt-3 border-t border-blue-200 space-y-2">
+                                <h5 className="text-xs font-bold text-blue-800">子任务步骤:</h5>
+                                {subtask.steps && subtask.steps.length > 0 ? (
+                                  subtask.steps.map(step => (
+                                    <div key={step.id} className="p-2 bg-white rounded border">
+                                      <p className="font-semibold">{step.step_id}: {step.agent_name}</p>
+                                      <p className="text-xs text-gray-600">状态: {getStatusText(step.status)}</p>
+                                    </div>
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
                                   ))
                                 ) : (
                                   <p className="text-xs text-gray-500">该子任务没有步骤。</p>
                                 )}
                               </CollapsibleContent>
+<<<<<<< HEAD
                             </Collapsible>
                           );
                         })}
+=======
+                            </div>
+                          </Collapsible>
+                        ))}
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
                       </div>
                     </div>
                   )}

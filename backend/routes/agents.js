@@ -27,6 +27,7 @@ router.get('/', asyncErrorHandler(async (req, res) => {
       app.app_name, app.base_url,
       (
         SELECT JSON_GROUP_ARRAY(
+<<<<<<< HEAD
           JSON_OBJECT(
             'capability_type', ac.capability_type,
             'target_id', ac.target_id,
@@ -40,6 +41,11 @@ router.get('/', asyncErrorHandler(async (req, res) => {
         )
         FROM agent_capabilities ac
         LEFT JOIN mcp_tools mt ON ac.target_id = mt.tool_name AND ac.capability_type = 'mcp_tool'
+=======
+          JSON_OBJECT('capability_type', ac.capability_type, 'target_id', ac.target_id, 'target_name', ac.target_name, 'config', ac.config)
+        )
+        FROM agent_capabilities ac
+>>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
         WHERE ac.agent_id = a.agent_id
       ) as capabilities_json
     FROM agents a

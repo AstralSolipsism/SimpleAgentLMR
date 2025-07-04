@@ -40,72 +40,76 @@ class AgentResponseParser {
     };
 
     // ReAct 模式下，只解析第一个有效的指令
-    if (options && options.react_mode) {
-      // 提取思考过程
-      const thoughtMatch = content.match(/Thought:(.*?)(?=Action:|Final Answer:|$)/s);
-      if (thoughtMatch) {
-        result.thought = thoughtMatch[1].trim();
-      }
+  if (options && options.react_mode) {
+    // 提取思考过程
+    const thoughtMatch = content.match(/Thought:(.*?)(?=Action:|Final Answer:|$)/s);
+    if (thoughtMatch) {
+      result.thought = thoughtMatch[1].trim();
+    }
 
-      // 查找第一个动作或最终答案
-      const finalAnswerMatch = content.match(/Final Answer:\s*(.*)/s);
-      if (finalAnswerMatch) {
-        const finalAction = { type: 'result', data: finalAnswerMatch[1].trim() };
-        result.actions.push(finalAction);
-        result.results.push(finalAction); // 兼容旧字段
-        result.hasStructuredOutput = true;
-        return result;
-      }
-
-      const actionMatch = content.match(/```json:(.*?)\s*\n([\s\S]*?)\n```/s); // 修改这里的正则表达式，使用[\s\S]*?匹配多行
-      if (actionMatch) {
-        const actionType = actionMatch[1].trim();
-        const actionJson = actionMatch[2].trim();
-        try {
-          const jsonToParse = actionType === 'skill-call'
-            ? actionJson.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '')
-            : actionJson;
-          const parsed = JSON.parse(jsonToParse);
-          let action = {};
-          
-          // 映射到协议定义的类型
-          switch (actionType) {
-            case 'a2a-task':
-              action = { type: 'task_transfer', ...parsed };
-              result.taskTransfers.push(action);
-              break;
-<<<<<<< HEAD
-=======
-            case 'vika-operation':
-              action = { type: 'vika_operation', ...parsed };
-              result.vikaOperations.push(action);
-              break;
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
-            case 'skill-call':
-              action = { type: 'skill_call', ...parsed };
-              result.skillCalls.push(action);
-              break;
-            case 'result':
-               action = { type: 'result', data: parsed }; // 如果LLM直接输出json:result，data应该是解析后的json
-               result.results.push(action);
-               result.actions.push(action); // 确保添加到actions中
-               result.hasStructuredOutput = true;
-               return result; // 直接返回，因为这是最终答案
-            default:
-              // 如果是不支持的类型，则不作为有效action
-              return result;
-          }
-          
-          result.actions.push(action);
-          result.hasStructuredOutput = true;
-
-        } catch (error) {
-          console.error(`ReAct模式下JSON解析错误 (${actionType}):`, error);
-        }
-      }
-      
+    // 查找第一个动作或最终答案
+    const finalAnswerMatch = content.match(/Final Answer:\s*(.*)/s);
+    if (finalAnswerMatch) {
+      const finalAction = { type: 'result', data: finalAnswerMatch[1].trim() };
+      result.actions.push(finalAction);
+      result.results.push(finalAction); // 兼容旧字段
+      result.hasStructuredOutput = true;
       return result;
     }
+
+    // 更健壮的正则表达式，只捕获json块内容
+    // 更健壮的正则表达式，处理可选的类型声明，并只捕获json块内容
+    const actionMatch = content.match(/```json(?::[a-zA-Z0-9_-]*)?\s*([\s\S]*?)\s*```/s);
+    if (actionMatch) {
+      const actionJson = actionMatch[1].trim();
+      try {
+        const parsed = JSON.parse(actionJson);
+        // 从JSON负载本身获取动作类型
+        const internalActionType = parsed.type;
+
+        if (!internalActionType) {
+          // 如果JSON中没有type字段，则无法处理
+          return result;
+        }
+
+        let action = null;
+        
+        // 映射到协议定义的类型
+        switch (internalActionType) {
+          case 'a2a-task':
+            // 将外部的 'a2a-task' 映射到内部的 'task_transfer'
+            // 确保我们的内部类型 'task_transfer' 不会被原始的 'a2a-task' 类型覆盖
+            action = { ...parsed, type: 'task_transfer' };
+            result.taskTransfers.push(action);
+            break;
+          case 'skill-call':
+            // 确保我们的内部类型 'skill_call' 不会被任何可能的原始类型覆盖
+            action = { ...parsed, type: 'skill_call' };
+            result.skillCalls.push(action);
+            break;
+          case 'result':
+             // 增强健壮性，接受多种可能的结果字段
+             action = { ...parsed, type: 'result', data: parsed.result || parsed.data || parsed };
+             result.results.push(action);
+             break;
+          default:
+            // 如果是不支持的类型，则不作为有效action
+            return result;
+        }
+        
+        // 确保所有有效action都被添加到actions数组中
+        if (action) {
+          result.actions.push(action);
+        }
+        result.hasStructuredOutput = true;
+
+      } catch (error) {
+        console.error(`ReAct模式下JSON解析错误:`, error, `\n原始JSON文本: ${actionJson}`);
+      }
+    }
+    
+    return result;
+  }
 
     // --- 以下是旧的、非ReAct模式的逻辑 ---
     const taskTransfers = this.extractPattern(content, this.patterns.taskTransfer);

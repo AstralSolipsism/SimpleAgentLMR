@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 from astral_vika import Vika
+from astral_vika.datasheet.record import Record
 import logging
 
 # 配置日志
@@ -223,51 +224,62 @@ async def get_records(
     page_size: Optional[int] = 100,
     page_token: Optional[str] = None,
     filter_formula: Optional[str] = None,
+    fields: Optional[str] = None,  # 新增 fields 参数
     vika: Vika = Depends(get_vika_client),
     _: None = Depends(rate_limit_check)
 ):
     """获取记录列表"""
     try:
-        # 生成缓存键
+        # 将逗号分隔的字符串转换为列表
+        field_list = fields.split(',') if fields else None
+
+        # 生成缓存键 (移除 page_token 和 page_size)
         cache_key = get_cache_key(
-            "records",
+            "records_all", # 使用新的缓存键前缀以避免冲突
             datasheet_id=datasheet_id,
             view_id=view_id,
-            page_size=page_size,
-            page_token=page_token,
-            filter_formula=filter_formula
+            filter_formula=filter_formula,
+            fields=fields
         )
         
         # 检查缓存
-        cached_result = get_from_cache(cache_key, max_age=300)  # 5分钟缓存
+        cached_result = get_from_cache(cache_key, max_age=300)
         if cached_result is not None:
-            return {"success": True, "data": cached_result, "from_cache": True}
+            return {
+                "success": True,
+                "data": cached_result,
+                "from_cache": True
+            }
         
         datasheet = vika.datasheet(datasheet_id)
         
-        # 构建查询参数
-        query_params = {}
-        if view_id:
-            query_params['view_id'] = view_id
-        if page_size:
-            query_params['page_size'] = page_size
-        if page_token:
-            query_params['page_token'] = page_token
-        if filter_formula:
-            query_params['formula'] = filter_formula
+        # 构建查询链
+        query = datasheet.records.filter(
+            filter_by_formula=filter_formula,
+            view_id=view_id,
+            fields=field_list
+        )
         
-        # 调用astral_vika的正确API
-        records = await datasheet.records.all().filter(**query_params).aall()
-        result = [record.to_dict() for record in records]
+        # 使用 .aall() 获取所有记录
+        all_records = await query.aall()
+        
+        # 将记录转换为字典列表
+        records_as_dicts = [record.to_dict() for record in all_records]
+
+        # 构建符合要求的返回结构，pageToken 永远为 null
+        result_data = {
+            "records": records_as_dicts,
+            "pageToken": None
+        }
         
         # 设置缓存
-        set_cache(cache_key, result)
+        set_cache(cache_key, result_data)
         
-        logger.info(f"获取记录成功: {datasheet_id}")
+        logger.info(f"获取全部记录成功: {datasheet_id}, 数量: {len(records_as_dicts)}")
         
         return {
             "success": True,
-            "data": result,
+            "data": result_data,
             "from_cache": False
         }
         

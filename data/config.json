@@ -6,10 +6,14 @@
     "environment": "test"
   },
   "vika": {
-    "userToken": "uskoInjR7NrA4OfkL97qN37",
-    "apiBase": "https://api.vika.cn",
+    "userToken": "uskavpcam8PkGvAcFAl7a1Q",
+    "apiBase": "https://app.ehv.csg.cn:7886",
     "spaceId": "spcBxkW6UiuzT",
-    "rateLimitQPS": 2
+    "rateLimitQPS": 2,
+    "autoSyncEnabled": false,
+    "syncTime": "03:00",
+    "syncIntervalDays": 1,
+    "lastSyncTimestamp": 0
   },
   "database": {
     "type": "sqlite",
@@ -51,5 +55,10 @@
     "enabled": true,
     "ttl": 3600,
     "maxKeys": 1000
-  }
+  },
+  "services": {
+    "serperApiKey": ""
+  },
+  "currentEnvironment": "test",
+  "environmentDescription": "测试环境 - 支持OPENAI格式"
 }

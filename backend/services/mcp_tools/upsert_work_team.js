@@ -5,8 +5,8 @@ const { globalConfig } = require('../../config/globalConfig');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // 定义维格表常量
-const PERSONNEL_SHEET_ID = 'dst924RyhqT9AC4FVz';
-const TEAM_SHEET_ID = 'dstQtU9m9SUboR5BmV';
+const PERSONNEL_SHEET_ID = 'dstfkxc0U2LTbjpERq';
+const TEAM_SHEET_ID = 'dstqX2E8uyNVYaURrQ';
 
 // 定义所需字段的常量名，便于维护和修改
 const FIELD_NAMES = {
@@ -17,7 +17,8 @@ const FIELD_NAMES = {
     TEAM_STATUS: '小组状态',
     VEHICLE_PLATE: '车牌号',
     TASKS_TODAY: '今日完成',
-    PLANS_TOMORROW: '明日计划'
+    PLANS_TOMORROW: '明日计划',
+    DAILY_REPORT: '日报记录'
 };
 
 /**
@@ -37,7 +38,7 @@ async function getAndVerifyFields() {
     logger.debug('从维格表收到的响应 (getAndVerifyFields):', { personnelFieldsRes, teamFieldsRes });
     if (!personnelFieldsRes.success || !teamFieldsRes.success) {
         const personnelError = !personnelFieldsRes.success ? `人员表: ${personnelFieldsRes.error}` : '';
-        const teamError = !teamFieldsRes.success ? `班组表: ${teamFieldsRes.error}` : '';
+        const teamError = !teamFieldsRes.success ? `小组表: ${teamFieldsRes.error}` : '';
         throw new Error(`无法获取维格表字段定义。${personnelError} ${teamError}`.trim());
     }
 
@@ -59,13 +60,14 @@ async function getAndVerifyFields() {
     // 返回一个包含所有已验证字段名的对象
     return {
         personnelName: findField(personnelFields, FIELD_NAMES.PERSONNEL_NAME, '人员表'),
-        teamLeader: findField(teamFields, FIELD_NAMES.TEAM_LEADER, '班组表'),
-        teamMembers: findField(teamFields, FIELD_NAMES.TEAM_MEMBERS, '班组表'),
-        teamDriver: findField(teamFields, FIELD_NAMES.TEAM_DRIVER, '班组表'),
-        teamStatus: findField(teamFields, FIELD_NAMES.TEAM_STATUS, '班组表'),
-        vehiclePlate: findField(teamFields, FIELD_NAMES.VEHICLE_PLATE, '班组表'),
-        tasksToday: findField(teamFields, FIELD_NAMES.TASKS_TODAY, '班组表'),
-        plansTomorrow: findField(teamFields, FIELD_NAMES.PLANS_TOMORROW, '班组表'),
+        teamLeader: findField(teamFields, FIELD_NAMES.TEAM_LEADER, '小组表'),
+        teamMembers: findField(teamFields, FIELD_NAMES.TEAM_MEMBERS, '小组表'),
+        teamDriver: findField(teamFields, FIELD_NAMES.TEAM_DRIVER, '小组表'),
+        teamStatus: findField(teamFields, FIELD_NAMES.TEAM_STATUS, '小组表'),
+        vehiclePlate: findField(teamFields, FIELD_NAMES.VEHICLE_PLATE, '小组表'),
+        tasksToday: findField(teamFields, FIELD_NAMES.TASKS_TODAY, '小组表'),
+        plansTomorrow: findField(teamFields, FIELD_NAMES.PLANS_TOMORROW, '小组表'),
+        dailyReport: findField(teamFields, FIELD_NAMES.DAILY_REPORT, '小组表'),
     };
 }
 
@@ -96,7 +98,7 @@ async function batchGetPersonRecordIds(names, personnelNameField) {
 
     const nameMap = {};
     if (response.data) {
-        response.data.forEach(record => {
+        response.data.records.forEach(record => {
             const nameFromVika = record.fields[personnelNameField];
             if (nameFromVika) {
                 // 对数据库返回的名字和用于匹配的键都进行trim
@@ -113,8 +115,8 @@ async function batchGetPersonRecordIds(names, personnelNameField) {
 }
 
 /**
- * @name 更新或创建班组记录 (Upsert)
- * @description 根据班组信息，在“班组表”中执行“有则更新，无则创建”操作。此工具会自动发现并验证所需的字段，确保操作的准确性。
+ * @name 更新或创建小组记录 (Upsert)
+ * @description 根据小组信息，在“小组表”中执行“有则更新，无则创建”操作。此工具会自动发现并验证所需的字段，确保操作的准确性。
  * @param {object} params - 参数对象
  * @param {object} params - 参数对象
  * @param {string} params.leader_name - 组长姓名
@@ -123,24 +125,25 @@ async function batchGetPersonRecordIds(names, personnelNameField) {
  * @param {string} params.vehicle_plate - 车牌号
  * @param {string} params.tasks_today - 今日完成任务
  * @param {string} params.plans_tomorrow - 明日计划
+ * @param {string} [params.dailyReportRecordId=null] - 关联的日报记录的recordID
  * @returns {Promise<object>} - 包含被操作记录ID的对象
  */
-async function upsert_work_team({ leader_name, member_names = [], driver_name, vehicle_plate, tasks_today, plans_tomorrow }) {
+async function upsert_work_team({ leader_name, member_names = [], driver_name, vehicle_plate, tasks_today, plans_tomorrow, dailyReportRecordId = null }) {
     try {
         // 步骤 1: 动态获取并验证字段
         const verifiedFields = await getAndVerifyFields();
 
-        // 步骤 2: 使用组长姓名查找现有班组
+        // 步骤 2: 使用组长姓名查找现有小组
         if (!leader_name) {
             throw new Error("输入信息中必须包含组长姓名 (leader_name)。");
         }
         const formula = `AND(COUNTIF({${verifiedFields.teamLeader}}, "${leader_name}"), {${verifiedFields.teamStatus}}="活跃中")`;
-        logger.debug('发送到维格表的请求数据 (查找班组通过姓名):', { datasheetId: TEAM_SHEET_ID, params: { filterByFormula: formula } });
+        logger.debug('发送到维格表的请求数据 (查找小组通过姓名):', { datasheetId: TEAM_SHEET_ID, params: { filterByFormula: formula } });
         const existingTeamsRes = await vikaService.getRecords(TEAM_SHEET_ID, { filterByFormula: formula });
-        logger.debug('从维格表收到的响应 (查找班组通过姓名):', existingTeamsRes);
+        logger.debug('从维格表收到的响应 (查找小组通过姓名):', existingTeamsRes);
 
         if (!existingTeamsRes.success) {
-            throw new Error(`通过组长姓名查找班组失败: ${existingTeamsRes.error}`);
+            throw new Error(`通过组长姓名查找小组失败: ${existingTeamsRes.error}`);
         }
 
         const existingTeams = existingTeamsRes.data || [];
@@ -148,7 +151,7 @@ async function upsert_work_team({ leader_name, member_names = [], driver_name, v
 
         if (existingTeams.length > 0) {
             if (existingTeams.length > 1) {
-                logger.warn(`数据一致性警告：找到多个以'${leader_name}'为组长的活跃班组。将只处理第一条记录。Record IDs: ${existingTeams.map(r => r.recordId).join(', ')}`);
+                logger.warn(`数据一致性警告：找到多个以'${leader_name}'为组长的活跃小组。将只处理第一条记录。Record IDs: ${existingTeams.map(r => r.recordId).join(', ')}`);
             }
             teamRecordId = existingTeams[0].recordId;
         }
@@ -165,22 +168,69 @@ async function upsert_work_team({ leader_name, member_names = [], driver_name, v
         const fieldsToUpsert = {
             [verifiedFields.teamLeader]: [leaderRecordId],
             [verifiedFields.teamMembers]: memberRecordIds,
-            [verifiedFields.teamDriver]: driverRecordId ? [driverRecordId] : null,
+            [verifiedFields.teamDriver]: driverRecordId ? [driverRecordId] : [],
             [verifiedFields.teamStatus]: '活跃中',
             [verifiedFields.vehiclePlate]: vehicle_plate,
             [verifiedFields.tasksToday]: tasks_today,
             [verifiedFields.plansTomorrow]: plans_tomorrow,
+            [verifiedFields.dailyReport]: dailyReportRecordId ? [dailyReportRecordId] : [],
         };
 
         // 步骤 5: 决策与执行 (Upsert)
         let result_record_id;
         if (teamRecordId) {
-            // 更新
-            logger.debug('发送到维格表的更新请求数据:', { datasheetId: TEAM_SHEET_ID, recordId: teamRecordId, data: fieldsToUpsert });
-            const updateRes = await vikaService.updateRecord(TEAM_SHEET_ID, teamRecordId, fieldsToUpsert);
-            logger.debug('从维格表收到的更新响应:', updateRes);
-            if (!updateRes.success) {
-                throw new Error(`更新班组失败: ${updateRes.error}`);
+            // 更新前，先比对数据，避免不必要的操作
+            const existingRecord = existingTeams[0].fields;
+            const changedFields = {};
+
+            // 比较单值字段
+            if (fieldsToUpsert[verifiedFields.vehiclePlate] !== existingRecord[verifiedFields.vehiclePlate]) {
+                const newValue = fieldsToUpsert[verifiedFields.vehiclePlate];
+                changedFields[verifiedFields.vehiclePlate] = newValue === undefined ? null : newValue;
+            }
+            if (fieldsToUpsert[verifiedFields.tasksToday] !== existingRecord[verifiedFields.tasksToday]) {
+                const newValue = fieldsToUpsert[verifiedFields.tasksToday];
+                changedFields[verifiedFields.tasksToday] = newValue === undefined ? null : newValue;
+            }
+            if (fieldsToUpsert[verifiedFields.plansTomorrow] !== existingRecord[verifiedFields.plansTomorrow]) {
+                const newValue = fieldsToUpsert[verifiedFields.plansTomorrow];
+                changedFields[verifiedFields.plansTomorrow] = newValue === undefined ? null : newValue;
+            }
+
+            // 比较多值关联字段（例如：小组成员）
+            const compareLinkFields = (newIds, oldIds) => {
+                if (!oldIds) oldIds = [];
+                const sortedNew = [...newIds].sort().join(',');
+                const sortedOld = [...oldIds].sort().join(',');
+                return sortedNew !== sortedOld;
+            };
+
+            if (compareLinkFields(fieldsToUpsert[verifiedFields.teamLeader], existingRecord[verifiedFields.teamLeader])) {
+                changedFields[verifiedFields.teamLeader] = fieldsToUpsert[verifiedFields.teamLeader];
+            }
+            if (compareLinkFields(fieldsToUpsert[verifiedFields.teamMembers], existingRecord[verifiedFields.teamMembers])) {
+                changedFields[verifiedFields.teamMembers] = fieldsToUpsert[verifiedFields.teamMembers];
+            }
+            if (compareLinkFields(fieldsToUpsert[verifiedFields.teamDriver], existingRecord[verifiedFields.teamDriver])) {
+                changedFields[verifiedFields.teamDriver] = fieldsToUpsert[verifiedFields.teamDriver];
+            }
+            
+            // 比较日报记录
+            if (compareLinkFields(fieldsToUpsert[verifiedFields.dailyReport], existingRecord[verifiedFields.dailyReport])) {
+                changedFields[verifiedFields.dailyReport] = fieldsToUpsert[verifiedFields.dailyReport];
+            }
+
+            // 关键修复：只有在检测到实际字段变更时才执行更新操作。
+            if (Object.keys(changedFields).length > 0) {
+                logger.info('检测到小组数据有变更，将执行更新操作。', { changedFields });
+                const updateRes = await vikaService.updateRecord(TEAM_SHEET_ID, teamRecordId, changedFields);
+                logger.debug('从维格表收到的更新响应:', updateRes);
+                if (!updateRes.success) {
+                    throw new Error(`更新小组失败: ${updateRes.error}`);
+                }
+            } else {
+                // 如果没有检测到变更，则记录日志并跳过更新，以避免发送空请求。
+                logger.info('小组数据与维格表记录一致，无需更新，跳过操作。');
             }
             result_record_id = teamRecordId;
         } else {
@@ -189,7 +239,7 @@ async function upsert_work_team({ leader_name, member_names = [], driver_name, v
             const createRes = await vikaService.createRecord(TEAM_SHEET_ID, fieldsToUpsert);
             logger.debug('从维格表收到的创建响应:', createRes);
             if (!createRes.success) {
-                throw new Error(`创建班组失败: ${createRes.error}`);
+                throw new Error(`创建小组失败: ${createRes.error}`);
             }
             result_record_id = createRes.data[0].recordId;
         }
@@ -208,19 +258,19 @@ module.exports = {
     name: 'upsert_work_team',
     func: upsert_work_team,
     doc: {
-        name: '更新或创建班组记录 (Upsert)',
-        description: '根据班组信息，在“班组表”中执行“有则更新，无则创建”操作。此工具会自动发现并验证所需的字段，确保操作的准确性。',
+        name: '更新或创建小组记录 (Upsert)',
+        description: '根据小组信息，在“小组表”中执行“有则更新，无则创建”操作。此工具会自动发现并验证所需的字段，确保操作的准确性。',
         input: {
             type: 'object',
             properties: {
                 leader_name: {
                     type: 'string',
-                    description: '班组的负责人姓名。'
+                    description: '小组的负责人姓名。'
                 },
                 member_names: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: '班组的成员姓名列表。',
+                    description: '小组的成员姓名列表。',
                     default: []
                 },
                 driver_name: {
@@ -238,6 +288,10 @@ module.exports = {
                 plans_tomorrow: {
                     type: 'string',
                     description: '明日的工作计划描述。'
+                },
+                dailyReportRecordId: {
+                    type: 'string',
+                    description: '关联的日报记录的recordID。'
                 }
             },
             required: ['leader_name', 'tasks_today', 'plans_tomorrow']
@@ -247,7 +301,7 @@ module.exports = {
             properties: {
                 team_record_id: {
                     type: 'string',
-                    description: '被操作（更新或创建）的班组记录的 recordID。'
+                    description: '被操作（更新或创建）的小组记录的 recordID。'
                 }
             }
         }

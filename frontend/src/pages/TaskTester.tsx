@@ -3,14 +3,56 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle, XCircle, Loader } from 'lucide-react';
-
+import { CheckCircle, XCircle, Loader, Info, ChevronDown, Share2, Wrench } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { generateStepSummary } from '@/lib/utils';
 interface Message {
   sender: 'user' | 'bot';
   content: string;
 }
 
 const LOCAL_STORAGE_KEY = 'taskTesterState';
+
+const RenderResponse = ({ data }: { data: any }) => {
+  if (data === null || data === undefined) {
+    return <span className="text-gray-500">null</span>;
+  }
+  if (typeof data === 'string') {
+    return (
+      <pre className={`text-xs text-gray-600 font-mono whitespace-pre-wrap`}>
+        <code>{data}</code>
+      </pre>
+    );
+  }
+  if (typeof data === 'number' || typeof data === 'boolean') {
+    return <span className="text-indigo-600">{data.toString()}</span>;
+  }
+  if (Array.isArray(data)) {
+    return (
+      <div className="pl-4 border-l border-gray-300">
+        {data.map((item, index) => (
+          <div key={index} className="flex items-start">
+            <span className="text-gray-500 mr-2">{index}:</span>
+            <RenderResponse data={item} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof data === 'object' && data !== null) {
+    return (
+      <div className="pl-4 border-l border-gray-300 space-y-1">
+        {Object.entries(data).map(([key, value]) => (
+          <div key={key} className="flex items-start">
+            <span className="font-semibold text-gray-700 mr-2">{key}:</span>
+            <RenderResponse data={value} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
 
 const TaskTester: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -39,11 +81,29 @@ const TaskTester: React.FC = () => {
         setTaskSteps(task.steps || []);
         setTaskResult(task.result || task.error);
 
-        const isFinalStatus = ['completed', 'failed', 'delegated'].includes(task.status);
-        if (!isFinalStatus) {
-          pollingTimeoutRef.current = setTimeout(() => pollTaskStatus(currentTaskId), 2000);
+        if (task.status === 'delegated') {
+          const subtask = task.subtasks && task.subtasks.length > 0 ? task.subtasks[0] : null;
+          if (subtask && subtask.id) {
+            const subtaskId = subtask.id;
+            const delegationStep = {
+              description: `任务已委托，正在追踪子任务 (ID: ${subtaskId})`,
+              status: 'info',
+            };
+            setTaskSteps(prevSteps => [...prevSteps, delegationStep]);
+            setTaskId(subtaskId); // 修复：只传递子任务的 ID
+            // 立即轮询新的子任务状态
+            pollTaskStatus(subtaskId);
+          } else {
+            setTaskResult({ error: '任务已委托，但未找到有效的子任务ID。' });
+            setIsPolling(false);
+          }
         } else {
-          setIsPolling(false);
+          const isFinalStatus = ['completed', 'failed'].includes(task.status);
+          if (!isFinalStatus) {
+            pollingTimeoutRef.current = setTimeout(() => pollTaskStatus(currentTaskId), 2000);
+          } else {
+            setIsPolling(false);
+          }
         }
       }
     } catch (error) {
@@ -78,7 +138,7 @@ const TaskTester: React.FC = () => {
       setMessages(savedState.messages || []);
       setSelectedSourceId(savedState.selectedSourceId || '');
 
-      const isFinalStatus = ['completed', 'failed', 'delegated'].includes(savedState.taskStatus);
+      const isFinalStatus = ['completed', 'failed'].includes(savedState.taskStatus);
       if (savedState.taskId && !isFinalStatus) {
         setIsPolling(true);
         pollTaskStatus(savedState.taskId);
@@ -158,6 +218,8 @@ const TaskTester: React.FC = () => {
         return <CheckCircle className="text-green-500" />;
       case 'failed':
         return <XCircle className="text-red-500" />;
+      case 'info':
+        return <Info className="text-gray-500" />;
       default:
         return <Loader className="animate-spin text-blue-500" />;
     }
@@ -200,10 +262,23 @@ const TaskTester: React.FC = () => {
                 <h4 className="font-semibold">任务进度 (ID: {taskId})</h4>
                 <ul className="space-y-2">
                   {taskSteps.map((step, index) => (
-                    <li key={index} className="flex items-center space-x-2 p-2 bg-white rounded-md border">
-                      {renderStepIcon(step.status)}
-                      <span className="flex-grow">{step.description}</span>
-                      <span className="text-xs text-gray-500">{step.status}</span>
+                    <li key={index} className="bg-white rounded-md border">
+                      <Collapsible>
+                        <CollapsibleTrigger className="flex items-center justify-between p-2 w-full text-left hover:bg-gray-50">
+                          <div className="flex items-center space-x-2 flex-grow">
+                            {renderStepIcon(step.status)}
+                            <span className="font-medium text-sm">{`步骤 ${index + 1}`}</span>
+                            <span className="text-sm text-gray-600 truncate">{generateStepSummary(step, index === taskSteps.length - 1, taskStatus || '')}</span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs text-gray-500 px-2 py-0.5 rounded-full bg-gray-100">{step.status}</span>
+                            <ChevronDown className="h-4 w-4 transition-transform duration-200 data-[state=open]:rotate-180" />
+                          </div>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="p-4 border-t bg-gray-50/50">
+                          <RenderResponse data={step} />
+                        </CollapsibleContent>
+                      </Collapsible>
                     </li>
                   ))}
                 </ul>
@@ -211,7 +286,11 @@ const TaskTester: React.FC = () => {
                   <div className="mt-4 p-4 rounded-md bg-gray-100">
                     <h4 className="font-bold mb-2">最终结果:</h4>
                     <pre className="whitespace-pre-wrap break-all text-sm">
-                      {typeof taskResult === 'object' ? JSON.stringify(taskResult, null, 2) : taskResult}
+                      {(() => {
+                        if (!taskResult) return null;
+                        if (typeof taskResult === 'string') return taskResult;
+                        return JSON.stringify(taskResult, null, 2);
+                      })()}
                     </pre>
                   </div>
                 )}

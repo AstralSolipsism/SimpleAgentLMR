@@ -33,7 +33,7 @@ class VikaService {
       // 创建axios实例
       this.apiClient = axios.create({
         baseURL: this.pythonServiceUrl,
-        timeout: 30000,
+        timeout: 300000, // 增加超时时间到5分钟
         headers: {
           'Content-Type': 'application/json'
         }
@@ -42,16 +42,12 @@ class VikaService {
       // 添加请求拦截器用于日志
       this.apiClient.interceptors.request.use(
         (config) => {
-<<<<<<< HEAD
           const requestInfo = {
             method: config.method?.toUpperCase(),
             url: config.url,
             data: config.data,
           };
           logger.debug(`[VIKA_REQUEST_DEBUG] Request PARAMS: ${JSON.stringify(requestInfo)}`);
-=======
-          logger.debug('发送到维格表的请求', { method: config.method?.toUpperCase(), url: config.url, data: config.data });
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
           return config;
         },
         (error) => {
@@ -63,11 +59,7 @@ class VikaService {
       // 添加响应拦截器
       this.apiClient.interceptors.response.use(
         (response) => {
-<<<<<<< HEAD
           logger.debug(`[VIKA_RESPONSE_DEBUG] Response DATA: ${JSON.stringify(response.data)}`);
-=======
-          logger.debug('收到维格表的响应', { status: response.status, data: response.data });
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
           return response;
         },
         (error) => {
@@ -252,18 +244,11 @@ class VikaService {
       await this.ensureInitialized();
       
       logger.debug('发送到维格表的请求', { datasheet_id: datasheetId, record_id: recordId, fields: fields });
-<<<<<<< HEAD
       const response = await this.apiClient.patch(`/records/${datasheetId}`, {
         records: [{
           record_id: recordId,
           fields: fields
         }]
-=======
-      const response = await this.apiClient.put('/records', {
-        datasheet_id: datasheetId,
-        record_id: recordId,
-        fields: fields
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
       });
       
       const result = this.handleApiResponse(response, `更新记录: ${datasheetId}/${recordId}`);
@@ -315,29 +300,36 @@ class VikaService {
   }
   
   // 获取记录列表
-<<<<<<< HEAD
   async getRecords(datasheetId, params = {}) {
     logger.info('正在从维格表获取记录列表', { datasheetId, params });
-=======
-  async getRecords(datasheetId, options = {}) {
-    logger.info('正在从维格表获取记录列表', { datasheetId });
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
     try {
       await this.sleep(this.apiDelay);
       await this.ensureInitialized();
 
-      // 将JS风格的驼峰命名转换为Python风格的下划线命名
-      const apiParams = {
-        view_id: params.viewId,
-        page_size: params.pageSize,
-        page_token: params.pageToken,
-        filter_formula: params.filterByFormula, // 关键映射
-      };
+      // **手动构建URL查询字符串**
+      const searchParams = new URLSearchParams();
 
-      // 移除所有值为 undefined 的键，以避免发送空参数
-      Object.keys(apiParams).forEach(key => apiParams[key] === undefined && delete apiParams[key]);
+      // 映射并添加参数
+      if (params.viewId) searchParams.append('view_id', params.viewId);
+      if (params.pageSize) searchParams.append('page_size', params.pageSize);
+      if (params.pageToken) searchParams.append('page_token', params.pageToken);
+      if (params.filterByFormula) searchParams.append('filter_formula', params.filterByFormula);
+      if (params.fields) {
+        // 如果 fields 是数组，则用逗号连接
+        if (Array.isArray(params.fields)) {
+          searchParams.append('fields', params.fields.join(','));
+        } else {
+          searchParams.append('fields', params.fields);
+        }
+      }
+      
+      const queryString = searchParams.toString();
+      const url = `/records/${datasheetId}${queryString ? `?${queryString}` : ''}`;
+      
+      logger.debug(`[VIKA_GET_RECORDS] Manually constructed URL: ${url}`);
 
-      const response = await this.apiClient.get(`/records/${datasheetId}`, { params: apiParams });
+      // **使用手动构建的URL，移除params配置**
+      const response = await this.apiClient.get(url);
 
       return this.handleApiResponse(response, `获取记录列表: ${datasheetId}`);
 

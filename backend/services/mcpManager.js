@@ -21,7 +21,6 @@ class MCPManager {
    * 初始化MCP管理器，动态加载所有本地工具
    * 确保只初始化一次
    */
-<<<<<<< HEAD
       async initialize() {
         if (this._initializePromise) {
           return this._initializePromise;
@@ -117,99 +116,6 @@ class MCPManager {
         })();
         return this._initializePromise;
       }
-=======
-  async initialize() {
-    if (this._initializePromise) {
-      return this._initializePromise;
-    }
-
-    this._initializePromise = (async () => {
-      try {
-        // 1. 从文件系统加载本地工具
-        await this.registerLocalTools();
-        const localToolNames = new Set(this.localTools.keys());
-        logger.info(`Found ${localToolNames.size} tools from local file system.`);
-
-        // 2. 从数据库获取已注册的工具
-        const dbToolNames = await new Promise((resolve, reject) => {
-          db.all('SELECT tool_name FROM mcp_tools WHERE type = ?', ['local'], (err, rows) => {
-            if (err) {
-              logger.error('Failed to query tools from database.', { error: err.message });
-              return reject(err);
-            }
-            resolve(new Set(rows.map(row => row.tool_name)));
-          });
-        });
-        logger.info(`Found ${dbToolNames.size} tools in the database.`);
-
-        // 3. 计算需要添加和删除的工具
-        const toolsToAdd = [...localToolNames].filter(name => !dbToolNames.has(name));
-        const toolsToRemove = [...dbToolNames].filter(name => !localToolNames.has(name));
-
-        if (toolsToAdd.length === 0 && toolsToRemove.length === 0) {
-          logger.info('Tool database is already in sync with the file system.');
-        } else {
-            logger.info(`Tools to add: ${toolsToAdd.length} (${toolsToAdd.join(', ')})`);
-            logger.info(`Tools to remove: ${toolsToRemove.length} (${toolsToRemove.join(', ')})`);
-    
-            const dbPromises = [];
-    
-            // 4a. 为需要添加的工具创建插入Promise
-            toolsToAdd.forEach(toolName => {
-              const tool = this.localTools.get(toolName);
-              const sql = `
-                INSERT INTO mcp_tools (tool_name, description, type, status, config)
-                VALUES (?, ?, ?, ?, ?)
-              `;
-              const params = [
-                tool.name,
-                tool.description || `一个名为 ${tool.name} 的工具`,
-                'local',
-                'active',
-                JSON.stringify(tool.config || {}),
-              ];
-              dbPromises.push(new Promise((resolve, reject) => {
-                db.run(sql, params, (err) => {
-                  if (err) {
-                    logger.error(`Failed to insert tool: ${toolName}`, { error: err.message });
-                    return reject(err);
-                  }
-                  logger.info(`Tool '${toolName}' inserted into database.`);
-                  resolve();
-                });
-              }));
-            });
-    
-            // 4b. 为需要删除的工具创建删除Promise
-            toolsToRemove.forEach(toolName => {
-              const sql = 'DELETE FROM mcp_tools WHERE tool_name = ?';
-              dbPromises.push(new Promise((resolve, reject) => {
-                db.run(sql, [toolName], (err) => {
-                  if (err) {
-                    logger.error(`Failed to delete tool: ${toolName}`, { error: err.message });
-                    return reject(err);
-                  }
-                  logger.info(`Tool '${toolName}' removed from database.`);
-                  resolve();
-                });
-              }));
-            });
-    
-            // 5. 并行执行所有数据库操作
-            await Promise.all(dbPromises);
-            logger.info('Database synchronization for tools is complete.');
-        }
-        
-        logger.info('MCP Manager initialized successfully.');
-      } catch (error) {
-        logger.error('MCP Manager initialization failed', { error: error.message });
-        this._initializePromise = null;
-        throw error;
-      }
-    })();
-    return this._initializePromise;
-  }
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
 
   /**
    * 注册单个工具，包括缓存和数据库同步
@@ -221,10 +127,7 @@ class MCPManager {
     logger.info(`[信息] 已加载工具到内存: ${toolName}`);
   }
 
-  /**
-   * 从mcp_tools目录动态加载并注册所有本地工具
-   */
-<<<<<<< HEAD
+
   /**
    * 从mcp_tools目录动态加载并注册所有本地工具。
    * 新版本能够健壮地处理多种模块导出模式。
@@ -318,49 +221,6 @@ class MCPManager {
       throw error; // 向上抛出异常，以便初始化过程可以捕获它
     }
     logger.info('所有本地工具加载完成。');
-=======
-  async registerLocalTools() {
-    const toolsDir = path.join(__dirname, 'mcp_tools');
-    try {
-      const toolFiles = fs.readdirSync(toolsDir);
-
-      for (const fileName of toolFiles) {
-        console.log(`[MCP扫描] 发现文件: ${fileName}`);
-        if (path.extname(fileName) === '.js') {
-          const toolPath = path.join(toolsDir, fileName);
-          try {
-            const requiredModule = require(toolPath);
-            
-            // 情况一: 模块导出一个标准的单一工具对象
-            if (requiredModule && typeof requiredModule.name === 'string' && typeof requiredModule.handler === 'function') {
-              this.registerTool(requiredModule.name, requiredModule);
-            }
-            // 情况二: 模块导出一个包含多个函数的对象
-            else if (typeof requiredModule === 'object' && requiredModule !== null) {
-              for (const toolName in requiredModule) {
-                if (typeof requiredModule[toolName] === 'function') {
-                  const toolObject = {
-                    name: toolName,
-                    // 优先使用函数上的文档字符串作为描述
-                    description: requiredModule[toolName].doc || `一个用于 ${toolName} 的工具`,
-                    handler: requiredModule[toolName]
-                  };
-                  this.registerTool(toolName, toolObject);
-                }
-              }
-            } else {
-              logger.warn(`无法从 ${fileName} 加载工具: 格式无效。`);
-            }
-          } catch (error) {
-            logger.error(`从 ${fileName} 加载工具失败`, { error: error.message });
-          }
-        }
-      }
-    } catch (error) {
-      logger.error(`读取工具目录失败: ${toolsDir}`, { error: error.message });
-      throw error;
-    }
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
   }
 
   /**
@@ -437,7 +297,6 @@ class MCPManager {
     logger.info('MCP tools reloaded successfully.');
   }
 
-<<<<<<< HEAD
   /**
    * 清理 agent_capabilities 表中的孤立记录
    * 这些记录指向的 mcp_tools 工具已被删除
@@ -468,8 +327,6 @@ class MCPManager {
     });
   }
 
-=======
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
   /**
    * 获取工具统计信息
    */

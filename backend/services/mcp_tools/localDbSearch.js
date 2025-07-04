@@ -14,10 +14,7 @@ const dbAll = (sql, params) => new Promise((resolve, reject) => {
 });
 
 /**
-<<<<<<< HEAD
  * @name 杆塔ID本地查询
-=======
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
  * 从本地数据库缓存中，根据一组杆塔的全名，高效地查询并返回它们对应的维格表 recordID。
  * @param {object} params - 参数对象。
  * @param {string[]} params.tower_names - 需要查询的杆塔名称数组。
@@ -53,13 +50,8 @@ async function get_tower_ids_from_local_db({ tower_names }) {
 
 get_tower_ids_from_local_db.doc = '从本地数据库缓存中，根据一组杆塔的全名，高效地查询并返回它们对应的维格表 recordID。输入一个名称数组，返回一个名称到ID的映射对象。';
 
-<<<<<<< HEAD
 get_tower_ids_from_local_db.displayName = '杆塔ID本地查询';
 module.exports = {
     name: 'local_db_search',
     func: get_tower_ids_from_local_db,
-=======
-module.exports = {
-    get_tower_ids_from_local_db,
->>>>>>> 30fd47290ae29c499b6b7eb7e416a81c8299d309
 };
